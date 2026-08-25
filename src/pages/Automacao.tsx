@@ -41,7 +41,6 @@ export function Automacao() {
 
   const [tab, setTab] = useState<Tab>('rules');
   const [rules, setRules] = useState<AutomationRule[]>([]);
-  const [logs, setLogs] = useState<AutomationLog[]>([]);
   const [queue, setQueue] = useState<AutomationQueueItem[]>([]);
   const [scheduled, setScheduled] = useState<ScheduledTask[]>([]);
   const [events, setEvents] = useState<EventLog[]>([]);

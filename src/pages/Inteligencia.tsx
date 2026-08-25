@@ -65,7 +65,6 @@ export function Inteligencia() {
   const isDefaulter = (a: Associado) => a.status_pagamento === 'inadimplente';
   const hasEquipmentOk = (m: QuadrantMember) => m.trackerCount > 0 && !m.hasProblemTracker;
   const hasEquipmentProblem = (m: QuadrantMember) => m.trackerCount > 0 && m.hasProblemTracker;
-  const hasNoEquipment = (m: QuadrantMember) => m.trackerCount === 0;
 
   // Quadrant 1: Pagantes com Equipamento OK (healthy)
   const healthy: QuadrantData = {

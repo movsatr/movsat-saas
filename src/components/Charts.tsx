@@ -23,7 +23,6 @@ export function BarChart({
 }) {
   if (data.length === 0) return <EmptyChart />;
   const maxVal = Math.max(...data.map((d) => d.value), 1);
-  const barWidth = 100 / data.length;
   const colorHex = COLORS[color];
 
   return (
@@ -66,7 +65,6 @@ export function GroupedBarChart({
 }) {
   if (data.length === 0) return <EmptyChart />;
   const maxVal = Math.max(...data.flatMap((d) => series.map((s) => d.values[s.key] || 0)), 1);
-  const groupWidth = 100 / data.length;
 
   return (
     <div className="w-full">

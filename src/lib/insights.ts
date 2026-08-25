@@ -166,8 +166,6 @@ export async function loadDiretoriaData(): Promise<{ kpis: DiretoriaKPIs; charts
 
   const lastMonth = new Date();
   lastMonth.setMonth(lastMonth.getMonth() - 1);
-  const lastMonthKey = lastMonth.toISOString().slice(0, 7);
-  const thisMonthKey = new Date().toISOString().slice(0, 7);
 
   const lastMonthRevenue = customers
     .filter((c) => c.created_at < lastMonth.toISOString() && c.status_pagamento !== 'inadimplente')

@@ -682,7 +682,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
                     <div className="flex gap-2 mt-3">
 
-                      <select
+                      {role !== 'operador' && <select
                         value={task.status}
                         onChange={async (event) => {
                           const newStatus =
@@ -731,7 +731,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                         <option value="cancelada">
                           Cancelada
                         </option>
-                      </select>
+                      </select>}
 
                     </div>
 

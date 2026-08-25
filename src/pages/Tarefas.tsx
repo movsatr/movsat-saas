@@ -10,8 +10,8 @@ import { friendlyError } from '@/lib/errors';
 import { DataTable, PageHeader, type Column } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import {
-  Button, PriorityBadge, StatusBadge, Badge, LoadingSpinner,
-  EmptyState, MetricCard, formatCurrency, formatDate,
+  Button, PriorityBadge, StatusBadge, LoadingSpinner,
+  MetricCard, formatCurrency, formatDate,
 } from '@/components/ui';
 import type { Task, Associado, OrdemServico, Rastreador } from '@/types';
 

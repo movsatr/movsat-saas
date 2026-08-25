@@ -5,10 +5,9 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import {
-  MetricCard, PriorityBadge, StatusBadge, Button, Badge,
+  MetricCard, PriorityBadge, StatusBadge,
   formatDate, LoadingSpinner, EmptyState,
 } from '@/components/ui';
-import { CaseView } from '@/components/CaseView';
 import type { Task, OrdemServico, Rastreador } from '@/types';
 
 interface OperadorData {
@@ -27,7 +26,6 @@ async function loadOperadorData(): Promise<OperadorData> {
   ]);
 
   const allOS = (osRes.data || []) as unknown as (OrdemServico & { associado: { nome: string } })[];
-  const today = new Date().toISOString().slice(0, 10);
 
   const installations = allOS
     .filter((o) => o.tipo === 'instalacao')
@@ -68,8 +66,6 @@ export function OperadorDashboard() {
   const [data, setData] = useState<OperadorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Section | null>(null);
-  const [resolveTarget, setResolveTarget] = useState<Task | null>(null);
-  const [resolution, setResolution] = useState('');
 
   useEffect(() => {
     loadOperadorData().then((d) => { setData(d); setLoading(false); });
@@ -99,18 +95,6 @@ export function OperadorDashboard() {
       items: data.pendingItems.map((t) => ({ id: t.id, title: t.title, subtitle: t.description || '', priority: t.priority, status: t.status, deadline: t.deadline })),
     },
   ];
-
-  const handleResolveTask = async () => {
-    if (!resolveTarget) return;
-    await supabase.from('tasks').update({
-      status: 'concluida',
-      resolution_notes: resolution,
-    }).eq('id', resolveTarget.id);
-    const updated = await loadOperadorData();
-    setData(updated);
-    setResolveTarget(null);
-    setResolution('');
-  };
 
   return (
     <div className="space-y-4">
@@ -167,14 +151,6 @@ export function OperadorDashboard() {
                             <Clock className="w-3 h-3" />{formatDate(item.deadline)}
                           </span>
                         )}
-                        {section.key === 'tasks' || section.key === 'pendingItems' ? (
-                          <Button variant="ghost" className="text-xs px-2 py-1" onClick={() => {
-                            const task = data.tasks.find((t) => t.id === item.id) || data.pendingItems.find((t) => t.id === item.id);
-                            if (task) { setResolveTarget(task); setResolution(''); }
-                          }}>
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          </Button>
-                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -188,42 +164,6 @@ export function OperadorDashboard() {
         )}
       </div>
 
-      <CaseView
-        open={!!resolveTarget}
-        title="Resolver Tarefa"
-        onClose={() => setResolveTarget(null)}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setResolveTarget(null)}>Cancelar</Button>
-            <Button onClick={handleResolveTask} disabled={!resolution.trim()}>Marcar como Resolvido</Button>
-          </>
-        }
-      >
-        {resolveTarget && (
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase mb-1">Tarefa</p>
-              <p className="text-sm font-medium text-slate-900 dark:text-white">{resolveTarget.title}</p>
-            </div>
-            {resolveTarget.description && (
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase mb-1">Descrição</p>
-                <p className="text-sm text-slate-600 dark:text-slate-300">{resolveTarget.description}</p>
-              </div>
-            )}
-            <div>
-              <label className="label">Notas de Resolução</label>
-              <textarea
-                value={resolution}
-                onChange={(e) => setResolution(e.target.value)}
-                rows={4}
-                className="input"
-                placeholder="Descreva como a tarefa foi resolvida..."
-              />
-            </div>
-          </div>
-        )}
-      </CaseView>
     </div>
   );
 }

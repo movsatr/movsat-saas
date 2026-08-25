@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ListTodo, Wrench, WifiOff, AlertTriangle, Package, CalendarClock, AlertOctagon, ArrowRight, CheckCircle2, TrendingDown } from 'lucide-react';
+import { ListTodo, Wrench, WifiOff, Package, CalendarClock, AlertOctagon, ArrowRight, CheckCircle2, TrendingDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { loadSupervisorData, type SupervisorData } from '@/lib/insights';
-import { MetricCard, PriorityBadge, StatusBadge, Button, Badge, formatCurrency, formatDate, LoadingSpinner, EmptyState } from '@/components/ui';
+import { MetricCard, Button, Badge, formatCurrency, formatDate, LoadingSpinner, EmptyState } from '@/components/ui';
 import { CaseView } from '@/components/CaseView';
 import { OperadorDashboard } from '@/pages/OperadorDashboard';
-import type { Task } from '@/types';
 
 type ActionCategory =
   | 'overdue_os' | 'offline_trackers' | 'low_stock' | 'installations' | 'high_alerts' | 'tasks_today';

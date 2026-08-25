@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
-  DollarSign, TrendingUp, TrendingDown, Users, Truck, Target,
-  Wallet, Banknote, AlertTriangle, Percent, Activity, CalendarClock,
-  Globe, Award, PieChart, BarChart3, Goal,
+  DollarSign, TrendingUp, TrendingDown, Users, Truck,
+  Wallet, Banknote, AlertTriangle, Activity, CalendarClock,
 } from 'lucide-react';
 import { loadDiretoriaData, type DiretoriaKPIs, type DiretoriaChartData } from '@/lib/insights';
 import { MetricCard, LoadingSpinner, formatCurrency } from '@/components/ui';
@@ -26,9 +25,6 @@ export function DiretoriaDashboard() {
   const fmt = (v: number) => formatCurrency(v);
   const growthTrend = kpis.growthVsLastMonth >= 0 ? 'up' : 'down' as 'up' | 'down';
 
-  const mrrProgress = kpis.goals.mrrTarget > 0 ? (kpis.mrr / kpis.goals.mrrTarget) * 100 : 0;
-  const churnProgress = kpis.churnRate > 0 ? (kpis.churnRate / kpis.goals.churnTarget) * 100 : 0;
-  const growthProgress = kpis.goals.growthTarget > 0 ? (kpis.growthVsLastMonth / kpis.goals.growthTarget) * 100 : 0;
 
   return (
     <div className="space-y-5">

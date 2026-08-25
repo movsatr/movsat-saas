@@ -29,7 +29,7 @@ export function Veiculos() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<VeiculoWithRel | null>(null);
   const [form, setForm] = useState<Partial<Veiculo>>({});
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [statusFilter] = useState<string>('');
 
   const loadData = async () => {
     const [veicRes, assocRes, rastRes] = await Promise.all([
