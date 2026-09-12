@@ -195,32 +195,3 @@ export function DiretoriaDashboard() {
   );
 }
 
-function GoalBar({ label, current, target, format, progress, inverse }: {
-  label: string;
-  current: number;
-  target: number;
-  format: (v: number) => string;
-  progress: number;
-  inverse?: boolean;
-}) {
-  const clampedProgress = Math.min(Math.max(progress, 0), 100);
-  const isGood = inverse ? progress < 100 : progress >= 50;
-  const barColor = isGood ? 'bg-emerald-500' : 'bg-red-500';
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
-        <span className="text-xs text-slate-400">
-          {format(current)} / {format(target)}
-        </span>
-      </div>
-      <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${clampedProgress}%` }}
-        />
-      </div>
-    </div>
-  );
-}
