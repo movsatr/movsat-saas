@@ -17,10 +17,15 @@ interface AuthState {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  passwordRecovery: boolean;
   signIn: (
     email: string,
     password: string
   ) => Promise<{ error: string | null }>;
+  updatePassword: (
+    password: string
+  ) => Promise<{ error: string | null }>;
+  finishPasswordRecovery: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -30,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   const loadProfile = useCallback(async (uid: string) => {
     console.log('MOVSAT AUTH: buscando profile:', uid);
@@ -47,33 +53,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }, 8000);
       });
 
-      const { data, error } = await Promise.race([query, timeout]);
+      const { data, error } = await Promise.race([
+        query,
+        timeout,
+      ]);
 
       if (error) {
-        console.error('MOVSAT AUTH: erro no profile:', error.message);
+        console.error(
+          'MOVSAT AUTH: erro no profile:',
+          error.message
+        );
         return null;
       }
 
-      console.log('MOVSAT AUTH: profile carregado:', data);
+      console.log(
+        'MOVSAT AUTH: profile carregado:',
+        data
+      );
 
       return data as Profile | null;
     } catch (error) {
-      console.error('MOVSAT AUTH: falha ao carregar profile:', error);
+      console.error(
+        'MOVSAT AUTH: falha ao carregar profile:',
+        error
+      );
+
       return null;
     }
   }, []);
 
   const initializeAuth = useCallback(async () => {
-    console.log('MOVSAT AUTH: iniciando autenticação...');
+    console.log(
+      'MOVSAT AUTH: iniciando autenticação...'
+    );
 
     try {
       const timeout = new Promise<never>((_, reject) => {
         setTimeout(() => {
-          reject(new Error('Timeout ao obter sessão do Supabase'));
+          reject(
+            new Error(
+              'Timeout ao obter sessão do Supabase'
+            )
+          );
         }, 8000);
       });
 
-      const sessionRequest = supabase.auth.getSession();
+      const sessionRequest =
+        supabase.auth.getSession();
 
       const result = await Promise.race([
         sessionRequest,
@@ -107,7 +133,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       setProfile(null);
     } finally {
-      console.log('MOVSAT AUTH: finalizando loading');
+      console.log(
+        'MOVSAT AUTH: finalizando loading'
+      );
 
       setLoading(false);
     }
@@ -120,38 +148,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, currentSession) => {
-      console.log(
-        'MOVSAT AUTH EVENT:',
-        event,
-        currentSession?.user?.email
-      );
-
-      if (!mounted) return;
-
-      setSession(currentSession);
-
-      if (!currentSession?.user) {
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
-
-      // Evita fazer consulta ao Supabase diretamente
-      // dentro do callback do onAuthStateChange.
-      setTimeout(async () => {
-        if (!mounted) return;
-
-        const currentProfile = await loadProfile(
-          currentSession.user.id
+    } = supabase.auth.onAuthStateChange(
+      (event, currentSession) => {
+        console.log(
+          'MOVSAT AUTH EVENT:',
+          event,
+          currentSession?.user?.email
         );
 
         if (!mounted) return;
 
-        setProfile(currentProfile);
-        setLoading(false);
-      }, 0);
-    });
+        if (event === 'PASSWORD_RECOVERY') {
+          console.log(
+            'MOVSAT AUTH: recuperação de senha detectada'
+          );
+
+          setPasswordRecovery(true);
+        }
+
+        setSession(currentSession);
+
+        if (!currentSession?.user) {
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+
+        setTimeout(async () => {
+          if (!mounted) return;
+
+          const currentProfile =
+            await loadProfile(
+              currentSession.user.id
+            );
+
+          if (!mounted) return;
+
+          setProfile(currentProfile);
+          setLoading(false);
+        }, 0);
+      }
+    );
 
     return () => {
       mounted = false;
@@ -161,12 +198,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(
     async (email: string, password: string) => {
-      console.log('MOVSAT AUTH: tentando login:', email);
+      console.log(
+        'MOVSAT AUTH: tentando login:',
+        email
+      );
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { error } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
       if (error) {
         console.error(
@@ -179,7 +220,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      console.log('MOVSAT AUTH: login realizado');
+      console.log(
+        'MOVSAT AUTH: login realizado'
+      );
 
       return {
         error: null,
@@ -188,11 +231,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const updatePassword = useCallback(
+    async (password: string) => {
+      console.log(
+        'MOVSAT AUTH: atualizando senha'
+      );
+
+      const { error } =
+        await supabase.auth.updateUser({
+          password,
+        });
+
+      if (error) {
+        console.error(
+          'MOVSAT AUTH: erro ao atualizar senha:',
+          error.message
+        );
+
+        return {
+          error: friendlyAuthError(error),
+        };
+      }
+
+      console.log(
+        'MOVSAT AUTH: senha atualizada com sucesso'
+      );
+
+      return {
+        error: null,
+      };
+    },
+    []
+  );
+
+  const finishPasswordRecovery = useCallback(() => {
+    console.log(
+      'MOVSAT AUTH: finalizando recuperação de senha'
+    );
+
+    setPasswordRecovery(false);
+  }, []);
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
 
     setProfile(null);
     setSession(null);
+    setPasswordRecovery(false);
     setLoading(false);
   }, []);
 
@@ -202,7 +287,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         loading,
+        passwordRecovery,
         signIn,
+        updatePassword,
+        finishPasswordRecovery,
         signOut,
       }}
     >

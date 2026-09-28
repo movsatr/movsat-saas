@@ -11,10 +11,11 @@ import { Button, StatusBadge, LoadingSpinner, formatCurrency, formatDate } from 
 import type { Associado } from '@/types';
 
 export function Associados() {
+
   const { profile } = useAuth();
   const role = profile?.role;
-  const canEdit = role === 'supervisor' || role === 'diretoria' || role === 'administrador';
-  const canDelete = role === 'diretoria' || role === 'administrador';
+  const canEdit = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
+  const canDelete = role === 'operador' || role === 'diretoria' || role === 'administrador';
   const canSeeFinancial = role === 'diretoria' || role === 'administrador';
 
   const [data, setData] = useState<Associado[]>([]);
