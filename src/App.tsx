@@ -1,4 +1,4 @@
-﻿import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { NavProvider, useNav } from '@/contexts/NavContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import { AppShell } from '@/components/AppShell';
