@@ -18,6 +18,7 @@ type VeiculoWithRel = Veiculo & {
 export function Veiculos() {
   const { profile } = useAuth();
   const role = profile?.role;
+  const canCreate = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canEdit = role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canDelete = role === 'diretoria' || role === 'administrador';
 
@@ -123,7 +124,7 @@ export function Veiculos() {
       <PageHeader
         title="Veículos"
         subtitle="Frota de veículos cadastrados"
-        action={canEdit ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Veículo</Button> : undefined}
+        action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Veículo</Button> : undefined}
       />
 
       <DataTable
@@ -141,7 +142,7 @@ export function Veiculos() {
         footer={
           <>
             <Button variant="secondary" onClick={closeDrawer}>Cancelar</Button>
-            {canEdit && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
+            {(canEdit || canCreate) && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
           </>
         }
       >
@@ -149,28 +150,28 @@ export function Veiculos() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Placa *</label>
-              <input className="input font-mono uppercase" disabled={!canEdit} value={form.placa ?? ''} onChange={(e) => setForm({ ...form, placa: e.target.value.toUpperCase() })} placeholder="ABC-1234" />
+              <input className="input font-mono uppercase" disabled={!(canEdit || creating)} value={form.placa ?? ''} onChange={(e) => setForm({ ...form, placa: e.target.value.toUpperCase() })} placeholder="ABC-1234" />
             </div>
             <div>
               <label className="label">Ano *</label>
-              <input className="input" type="number" disabled={!canEdit} value={form.ano ?? ''} onChange={(e) => setForm({ ...form, ano: Number(e.target.value) })} placeholder="2024" />
+              <input className="input" type="number" disabled={!(canEdit || creating)} value={form.ano ?? ''} onChange={(e) => setForm({ ...form, ano: Number(e.target.value) })} placeholder="2024" />
             </div>
           </div>
           <div>
             <label className="label">Modelo *</label>
-            <input className="input" disabled={!canEdit} value={form.modelo ?? ''} onChange={(e) => setForm({ ...form, modelo: e.target.value })} placeholder="Honda Civic" />
+            <input className="input" disabled={!(canEdit || creating)} value={form.modelo ?? ''} onChange={(e) => setForm({ ...form, modelo: e.target.value })} placeholder="Honda Civic" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Associado</label>
-              <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value || null })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value || null })}>
                 <option value="">Sem associado</option>
                 {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
               </select>
             </div>
             <div>
               <label className="label">Rastreador</label>
-              <select className="input" disabled={!canEdit} value={form.rastreador_id ?? ''} onChange={(e) => setForm({ ...form, rastreador_id: e.target.value || null })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.rastreador_id ?? ''} onChange={(e) => setForm({ ...form, rastreador_id: e.target.value || null })}>
                 <option value="">Sem rastreador</option>
                 {rastreadores.map((r) => <option key={r.id} value={r.id}>{r.imei}{r.modelo ? ` — ${r.modelo}` : ''}</option>)}
               </select>
@@ -179,11 +180,11 @@ export function Veiculos() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">ID Mutualsoft</label>
-              <input className="input" disabled={!canEdit} value={form.id_externo ?? ''} onChange={(e) => setForm({ ...form, id_externo: e.target.value || null })} placeholder="Opcional" />
+              <input className="input" disabled={!(canEdit || creating)} value={form.id_externo ?? ''} onChange={(e) => setForm({ ...form, id_externo: e.target.value || null })} placeholder="Opcional" />
             </div>
             <div>
               <label className="label">Status</label>
-              <select className="input" disabled={!canEdit} value={form.status ?? 'ativo'} onChange={(e) => setForm({ ...form, status: e.target.value as Veiculo['status'] })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.status ?? 'ativo'} onChange={(e) => setForm({ ...form, status: e.target.value as Veiculo['status'] })}>
                 <option value="ativo">Ativo</option>
                 <option value="inativo">Inativo</option>
               </select>

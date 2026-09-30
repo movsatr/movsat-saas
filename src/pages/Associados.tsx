@@ -14,6 +14,7 @@ export function Associados() {
 
   const { profile } = useAuth();
   const role = profile?.role;
+  const canCreate = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canEdit = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canDelete = role === 'operador' || role === 'diretoria' || role === 'administrador';
   const canSeeFinancial = role === 'diretoria' || role === 'administrador';
@@ -112,7 +113,7 @@ export function Associados() {
       <PageHeader
         title="Associados"
         subtitle="Gestão de clientes e mensalidades"
-        action={canEdit ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Associado</Button> : undefined}
+        action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Associado</Button> : undefined}
       />
       <DataTable
         data={data}

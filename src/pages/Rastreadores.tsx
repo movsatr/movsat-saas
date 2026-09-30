@@ -15,6 +15,7 @@ type RastreadorWithAssoc = RastreadorWithVeiculo & { associado?: { nome: string 
 export function Rastreadores() {
   const { profile } = useAuth();
   const role = profile?.role;
+  const canCreate = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canEdit = role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canDelete = role === 'diretoria' || role === 'administrador';
 
@@ -131,7 +132,7 @@ export function Rastreadores() {
     {
       key: 'actions', header: '', render: (row) => (
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          {canEdit && <button onClick={() => openEdit(row)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Editar"><Pencil className="w-4 h-4 text-slate-500" /></button>}
+            {canEdit && <button onClick={() => openEdit(row)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Editar"><Pencil className="w-4 h-4 text-slate-500" /></button>}
           {canDelete && <button onClick={() => setDeleteTarget(row)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Excluir"><Trash2 className="w-4 h-4 text-red-500" /></button>}
         </div>
       ),
@@ -145,7 +146,7 @@ export function Rastreadores() {
       <PageHeader
         title="Rastreadores"
         subtitle="Gestão de equipamentos e veículos"
-        action={canEdit ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Rastreador</Button> : undefined}
+        action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Rastreador</Button> : undefined}
       />
       <DataTable
         data={data}
@@ -162,7 +163,7 @@ export function Rastreadores() {
         footer={
           <>
             <Button variant="secondary" onClick={closeDrawer}>Cancelar</Button>
-            {canEdit && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
+            {(canEdit || canCreate) && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
           </>
         }
       >
@@ -170,23 +171,23 @@ export function Rastreadores() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">IMEI *</label>
-              <input className="input font-mono" disabled={!canEdit} value={form.imei ?? ''} onChange={(e) => setForm({ ...form, imei: e.target.value })} placeholder="000000000000000" />
+              <input className="input font-mono" disabled={!(canEdit || creating)} value={form.imei ?? ''} onChange={(e) => setForm({ ...form, imei: e.target.value })} placeholder="000000000000000" />
             </div>
             <div>
               <label className="label">Modelo *</label>
-              <input className="input" disabled={!canEdit} value={form.modelo ?? ''} onChange={(e) => setForm({ ...form, modelo: e.target.value })} placeholder="GT06, TK303, etc." />
+              <input className="input" disabled={!(canEdit || creating)} value={form.modelo ?? ''} onChange={(e) => setForm({ ...form, modelo: e.target.value })} placeholder="GT06, TK303, etc." />
             </div>
           </div>
           <div>
             <label className="label">Associado</label>
-            <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value || undefined })}>
+            <select className="input" disabled={!(canEdit || creating)} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value || undefined })}>
               <option value="">Sem associado</option>
               {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </div>
           <div>
             <label className="label">Veículo vinculado</label>
-            <select className="input" disabled={!canEdit} value={selectedVeiculoId ?? ''} onChange={(e) => handleVeiculoChange(e.target.value || null)}>
+            <select className="input" disabled={!(canEdit || creating)} value={selectedVeiculoId ?? ''} onChange={(e) => handleVeiculoChange(e.target.value || null)}>
               <option value="">Sem veículo</option>
               {veiculos.map((v) => <option key={v.id} value={v.id}>{v.placa} — {v.modelo} ({v.ano})</option>)}
             </select>
@@ -194,7 +195,7 @@ export function Rastreadores() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Status</label>
-              <select className="input" disabled={!canEdit} value={form.status ?? 'ativo'} onChange={(e) => setForm({ ...form, status: e.target.value as Rastreador['status'] })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.status ?? 'ativo'} onChange={(e) => setForm({ ...form, status: e.target.value as Rastreador['status'] })}>
                 <option value="ativo">Ativo</option>
                 <option value="inativo">Inativo</option>
                 <option value="com_problema">Com problema</option>
@@ -203,12 +204,12 @@ export function Rastreadores() {
             </div>
             <div>
               <label className="label">Data de Instalação</label>
-              <input className="input" type="date" disabled={!canEdit} value={form.data_instalacao ?? ''} onChange={(e) => setForm({ ...form, data_instalacao: e.target.value || null })} />
+              <input className="input" type="date" disabled={!(canEdit || creating)} value={form.data_instalacao ?? ''} onChange={(e) => setForm({ ...form, data_instalacao: e.target.value || null })} />
             </div>
           </div>
           <div>
             <label className="label">Observações</label>
-            <textarea className="input" rows={3} disabled={!canEdit} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas sobre o equipamento" />
+            <textarea className="input" rows={3} disabled={!(canEdit || creating)} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas sobre o equipamento" />
           </div>
         </div>
       </CaseView>

@@ -27,7 +27,8 @@ const categoriaColors: Record<EstoqueItem['categoria'], 'blue' | 'purple' | 'gre
 export function Estoque() {
   const { profile } = useAuth();
   const role = profile?.role;
-  const canEdit = role === 'supervisor' || role === 'diretoria' || role === 'administrador';
+  const canCreate = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
+  const canEdit = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canDelete = role === 'diretoria' || role === 'administrador';
 
   const [data, setData] = useState<EstoqueItem[]>([]);
@@ -130,7 +131,7 @@ export function Estoque() {
       <PageHeader
         title="Estoque"
         subtitle="Controle de equipamentos e insumos"
-        action={canEdit ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Item</Button> : undefined}
+        action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Item</Button> : undefined}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">

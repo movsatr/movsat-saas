@@ -20,6 +20,7 @@ type OSWithRelations = OrdemServico & {
 export function OrdensServico() {
   const { profile } = useAuth();
   const role = profile?.role;
+  const canCreate = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canEdit = role === 'supervisor' || role === 'diretoria' || role === 'administrador';
   const canDelete = role === 'diretoria' || role === 'administrador';
 
@@ -196,7 +197,7 @@ export function OrdensServico() {
       <PageHeader
         title="Ordens de Serviço"
         subtitle="Solicitações de instalação, manutenção e remoção"
-        action={canEdit ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Nova OS</Button> : undefined}
+        action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Nova OS</Button> : undefined}
       />
       <DataTable
         data={data}
@@ -213,7 +214,7 @@ export function OrdensServico() {
         footer={
           <>
             <Button variant="secondary" onClick={closeDrawer}>Cancelar</Button>
-            {canEdit && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
+            {(canEdit || canCreate) && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
           </>
         }
       >
@@ -221,11 +222,11 @@ export function OrdensServico() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Número *</label>
-              <input className="input font-mono" disabled={!canEdit} value={form.numero ?? ''} onChange={(e) => setForm({ ...form, numero: e.target.value })} placeholder="OS-2024-0001" />
+              <input className="input font-mono" disabled={!(canEdit || creating)} value={form.numero ?? ''} onChange={(e) => setForm({ ...form, numero: e.target.value })} placeholder="OS-2024-0001" />
             </div>
             <div>
               <label className="label">Tipo</label>
-              <select className="input" disabled={!canEdit} value={form.tipo ?? 'instalacao'} onChange={(e) => setForm({ ...form, tipo: e.target.value as OrdemServico['tipo'] })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.tipo ?? 'instalacao'} onChange={(e) => setForm({ ...form, tipo: e.target.value as OrdemServico['tipo'] })}>
                 <option value="instalacao">Instalação</option>
                 <option value="manutencao">Manutenção</option>
                 <option value="remocao">Remoção</option>
@@ -235,7 +236,7 @@ export function OrdensServico() {
           </div>
           <div>
             <label className="label">Associado *</label>
-            <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value, rastreador_id: null, veiculo_id: null })}>
+            <select className="input" disabled={!(canEdit || creating)} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value, rastreador_id: null, veiculo_id: null })}>
               <option value="">Selecione...</option>
               {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
@@ -243,7 +244,7 @@ export function OrdensServico() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Rastreador {form.tipo === 'instalacao' ? '*' : ''}</label>
-              <select className="input" disabled={!canEdit || !form.associado_id} value={form.rastreador_id ?? ''} onChange={(e) => setForm({ ...form, rastreador_id: e.target.value || null })}>
+              <select className="input" disabled={!(canEdit || creating) || !form.associado_id} value={form.rastreador_id ?? ''} onChange={(e) => setForm({ ...form, rastreador_id: e.target.value || null })}>
                 <option value="">{form.associado_id ? 'Selecione...' : 'Selecione um associado'}</option>
                 {filteredRastreadores.map((r) => {
                   const linkedVeic = veiculoOfRastreador(r.id);
@@ -260,7 +261,7 @@ export function OrdensServico() {
             </div>
             <div>
               <label className="label">Prestador</label>
-              <select className="input" disabled={!canEdit} value={form.prestador_id ?? ''} onChange={(e) => setForm({ ...form, prestador_id: e.target.value || null })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.prestador_id ?? ''} onChange={(e) => setForm({ ...form, prestador_id: e.target.value || null })}>
                 <option value="">Sem prestador</option>
                 {activePrestadores.map((p) => <option key={p.id} value={p.id}>{p.nome} ({p.especialidade})</option>)}
               </select>
@@ -269,7 +270,7 @@ export function OrdensServico() {
           {form.tipo === 'instalacao' && (
             <div>
               <label className="label">Veículo *</label>
-              <select className="input" disabled={!canEdit || !form.associado_id} value={form.veiculo_id ?? ''} onChange={(e) => setForm({ ...form, veiculo_id: e.target.value || null })}>
+              <select className="input" disabled={!(canEdit || creating) || !form.associado_id} value={form.veiculo_id ?? ''} onChange={(e) => setForm({ ...form, veiculo_id: e.target.value || null })}>
                 <option value="">{form.associado_id ? 'Selecione...' : 'Selecione um associado'}</option>
                 {filteredVeiculos.map((v) => {
                   const labelParts = [`${v.placa} — ${v.modelo} (${v.ano})`];
@@ -290,7 +291,7 @@ export function OrdensServico() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Status</label>
-              <select className="input" disabled={!canEdit} value={form.status ?? 'aberta'} onChange={(e) => setForm({ ...form, status: e.target.value as OrdemServico['status'] })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.status ?? 'aberta'} onChange={(e) => setForm({ ...form, status: e.target.value as OrdemServico['status'] })}>
                 <option value="aberta">Aberta</option>
                 <option value="em_andamento">Em andamento</option>
                 <option value="concluida">Concluída</option>
@@ -299,7 +300,7 @@ export function OrdensServico() {
             </div>
             <div>
               <label className="label">Prioridade</label>
-              <select className="input" disabled={!canEdit} value={form.prioridade ?? 'normal'} onChange={(e) => setForm({ ...form, prioridade: e.target.value as OrdemServico['prioridade'] })}>
+              <select className="input" disabled={!(canEdit || creating)} value={form.prioridade ?? 'normal'} onChange={(e) => setForm({ ...form, prioridade: e.target.value as OrdemServico['prioridade'] })}>
                 <option value="baixa">Baixa</option>
                 <option value="normal">Normal</option>
                 <option value="alta">Alta</option>
@@ -310,24 +311,24 @@ export function OrdensServico() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Data de Abertura</label>
-              <input className="input" type="date" disabled={!canEdit} value={form.data_abertura ?? ''} onChange={(e) => setForm({ ...form, data_abertura: e.target.value })} />
+              <input className="input" type="date" disabled={!(canEdit || creating)} value={form.data_abertura ?? ''} onChange={(e) => setForm({ ...form, data_abertura: e.target.value })} />
             </div>
             <div>
               <label className="label">Data de Conclusão</label>
-              <input className="input" type="date" disabled={!canEdit} value={form.data_conclusao ?? ''} onChange={(e) => setForm({ ...form, data_conclusao: e.target.value || null })} />
+              <input className="input" type="date" disabled={!(canEdit || creating)} value={form.data_conclusao ?? ''} onChange={(e) => setForm({ ...form, data_conclusao: e.target.value || null })} />
             </div>
           </div>
           <div>
             <label className="label">Descrição</label>
-            <textarea className="input" rows={3} disabled={!canEdit} value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value || null })} placeholder="Descreva o problema ou solicitação" />
+            <textarea className="input" rows={3} disabled={!(canEdit || creating)} value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value || null })} placeholder="Descreva o problema ou solicitação" />
           </div>
           <div>
             <label className="label">Solução</label>
-            <textarea className="input" rows={3} disabled={!canEdit} value={form.solucao ?? ''} onChange={(e) => setForm({ ...form, solucao: e.target.value || null })} placeholder="Descreva a solução aplicada" />
+            <textarea className="input" rows={3} disabled={!(canEdit || creating)} value={form.solucao ?? ''} onChange={(e) => setForm({ ...form, solucao: e.target.value || null })} placeholder="Descreva a solução aplicada" />
           </div>
           <div>
             <label className="label">Observações</label>
-            <textarea className="input" rows={2} disabled={!canEdit} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas adicionais" />
+            <textarea className="input" rows={2} disabled={!(canEdit || creating)} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas adicionais" />
           </div>
         </div>
       </CaseView>
