@@ -8,11 +8,12 @@ import { DataTable, PageHeader, type Column } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, PriorityBadge, LoadingSpinner, formatDate } from '@/components/ui';
-import type { OrdemServico, Associado, Rastreador, Prestador } from '@/types';
+import type { OrdemServico, Associado, Rastreador, Prestador, Veiculo } from '@/types';
 
 type OSWithRelations = OrdemServico & {
   associado?: { nome: string } | null;
   rastreador?: { imei: string } | null;
+  veiculo?: { placa: string; modelo: string }[] | null;
   prestador?: { nome: string } | null;
 };
 
@@ -25,6 +26,7 @@ export function OrdensServico() {
   const [data, setData] = useState<OSWithRelations[]>([]);
   const [associados, setAssociados] = useState<Associado[]>([]);
   const [rastreadores, setRastreadores] = useState<Rastreador[]>([]);
+  const [veiculos, setVeiculos] = useState<Veiculo[]>([]);
   const [prestadores, setPrestadores] = useState<Prestador[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<OSWithRelations | null>(null);
@@ -33,15 +35,17 @@ export function OrdensServico() {
   const [form, setForm] = useState<Partial<OrdemServico>>({});
 
   const loadData = async () => {
-    const [osRes, assocRes, rastRes, prestRes] = await Promise.all([
-      supabase.from('ordens_servico').select('*, associado:associados(nome), rastreador:rastreadores(imei), prestador:prestadores(nome)').order('data_abertura', { ascending: false }),
+    const [osRes, assocRes, rastRes, veicRes, prestRes] = await Promise.all([
+      supabase.from('ordens_servico').select('*, associado:associados(nome), rastreador:rastreadores(imei), veiculo:veiculos(placa,modelo), prestador:prestadores(nome)').order('data_abertura', { ascending: false }),
       supabase.from('associados').select('id, nome').order('nome'),
-      supabase.from('rastreadores').select('id, imei, associado_id').order('imei'),
+      supabase.from('rastreadores').select('id, imei, associado_id, status').order('imei'),
+      supabase.from('veiculos').select('id, placa, modelo, ano, associado_id, rastreador_id').order('placa'),
       supabase.from('prestadores').select('id, nome, especialidade, status').order('nome'),
     ]);
     setData((osRes.data || []) as OSWithRelations[]);
     setAssociados((assocRes.data || []) as Associado[]);
     setRastreadores((rastRes.data || []) as Rastreador[]);
+    setVeiculos((veicRes.data || []) as Veiculo[]);
     setPrestadores((prestRes.data || []) as Prestador[]);
     setLoading(false);
   };
@@ -63,8 +67,8 @@ export function OrdensServico() {
   };
 
   const openEdit = (row: OSWithRelations) => {
-    const { associado, rastreador, prestador, ...rest } = row;
-    void associado; void rastreador; void prestador;
+    const { associado, rastreador, veiculo, prestador, ...rest } = row;
+    void associado; void rastreador; void veiculo; void prestador;
     setForm(rest);
     setEditing(row);
     setCreating(false);
@@ -79,13 +83,18 @@ export function OrdensServico() {
   const handleSave = async () => {
     if (!form.numero?.trim()) { toast.error('Número da OS é obrigatório'); return; }
     if (!form.associado_id) { toast.error('Selecione um associado'); return; }
+    if (form.tipo === 'instalacao' && !form.rastreador_id) { toast.error('Selecione um rastreador para a instalação'); return; }
+    if (form.tipo === 'instalacao' && !form.veiculo_id) { toast.error('Selecione um veículo para a instalação'); return; }
     const payload: Record<string, unknown> = { ...form };
     delete payload.id;
     delete payload.created_at;
     delete payload.updated_at;
     Object.keys(payload).forEach((k) => { if (payload[k] === '') payload[k] = null; });
 
-    // Auto-set data_conclusao when status changes to 'concluida'
+    const isConcludingInstallation =
+      payload.status === 'concluida' && form.tipo === 'instalacao' &&
+      editing?.status !== 'concluida';
+
     if (payload.status === 'concluida' && !payload.data_conclusao) {
       payload.data_conclusao = new Date().toISOString().slice(0, 10);
     }
@@ -95,6 +104,21 @@ export function OrdensServico() {
       : await supabase.from('ordens_servico').insert(payload);
 
     if (error) { toast.error(friendlyError(error, 'ordens de servico')); return; }
+
+    if (isConcludingInstallation && form.rastreador_id && form.veiculo_id) {
+      const conclusionDate = payload.data_conclusao as string;
+      const [veicUpdate, rastUpdate] = await Promise.all([
+        supabase.from('veiculos').update({ rastreador_id: form.rastreador_id }).eq('id', form.veiculo_id),
+        supabase.from('rastreadores').update({
+          status: 'ativo',
+          data_instalacao: conclusionDate,
+          associado_id: form.associado_id,
+        }).eq('id', form.rastreador_id),
+      ]);
+      if (veicUpdate.error) { toast.error('OS salva, mas erro ao vincular veículo: ' + friendlyError(veicUpdate.error, 'veiculos')); }
+      if (rastUpdate.error) { toast.error('OS salva, mas erro ao atualizar rastreador: ' + friendlyError(rastUpdate.error, 'rastreadores')); }
+    }
+
     toast.success(editing ? 'Ordem de serviço atualizada com sucesso' : 'Ordem de serviço criada com sucesso');
     closeDrawer();
     loadData();
@@ -110,8 +134,12 @@ export function OrdensServico() {
   };
 
   const filteredRastreadores = form.associado_id
-    ? rastreadores.filter((r) => r.associado_id === form.associado_id)
+    ? rastreadores.filter((r) => r.associado_id === form.associado_id || !r.associado_id)
     : rastreadores;
+
+  const filteredVeiculos = form.associado_id
+    ? veiculos.filter((v) => v.associado_id === form.associado_id || !v.associado_id)
+    : veiculos;
 
   const activePrestadores = prestadores.filter((p) => p.status === 'ativo');
 
@@ -119,6 +147,7 @@ export function OrdensServico() {
     { key: 'numero', header: 'Número', sortable: true, render: (r) => <span className="font-mono text-xs font-semibold text-slate-900 dark:text-white">{r.numero}</span> },
     { key: 'associado', header: 'Associado', sortable: true, sortValue: (r) => r.associado?.nome ?? '', render: (r) => r.associado?.nome || <span className="text-slate-400">—</span> },
     { key: 'rastreador', header: 'Rastreador', sortable: true, sortValue: (r) => r.rastreador?.imei ?? '', render: (r) => r.rastreador?.imei ? <span className="font-mono text-xs">{r.rastreador.imei}</span> : '-' },
+    { key: 'veiculo', header: 'Veículo', sortable: true, sortValue: (r) => r.veiculo?.[0]?.placa ?? '', render: (r) => r.veiculo?.[0] ? <span className="font-mono text-xs uppercase">{r.veiculo[0].placa}</span> : '-' },
     { key: 'prestador', header: 'Prestador', render: (r) => r.prestador?.nome || '-' },
     { key: 'tipo', header: 'Tipo', sortable: true, render: (r) => <span className="capitalize">{r.tipo}</span> },
     { key: 'status', header: 'Status', sortable: true, render: (r) => <StatusBadge status={r.status} /> },
@@ -181,17 +210,21 @@ export function OrdensServico() {
           </div>
           <div>
             <label className="label">Associado *</label>
-            <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value, rastreador_id: null })}>
+            <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value, rastreador_id: null, veiculo_id: null })}>
               <option value="">Selecione...</option>
               {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">Rastreador</label>
+              <label className="label">Rastreador {form.tipo === 'instalacao' ? '*' : ''}</label>
               <select className="input" disabled={!canEdit || !form.associado_id} value={form.rastreador_id ?? ''} onChange={(e) => setForm({ ...form, rastreador_id: e.target.value || null })}>
-                <option value="">{form.associado_id ? 'Sem rastreador' : 'Selecione um associado'}</option>
-                {filteredRastreadores.map((r) => <option key={r.id} value={r.id}>{r.imei}</option>)}
+                <option value="">{form.associado_id ? 'Selecione...' : 'Selecione um associado'}</option>
+                {filteredRastreadores.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.imei}{!r.associado_id ? ' (livre)' : ''}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -202,6 +235,19 @@ export function OrdensServico() {
               </select>
             </div>
           </div>
+          {form.tipo === 'instalacao' && (
+            <div>
+              <label className="label">Veículo *</label>
+              <select className="input" disabled={!canEdit || !form.associado_id} value={form.veiculo_id ?? ''} onChange={(e) => setForm({ ...form, veiculo_id: e.target.value || null })}>
+                <option value="">{form.associado_id ? 'Selecione...' : 'Selecione um associado'}</option>
+                {filteredVeiculos.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.placa} — {v.modelo} ({v.ano}){!v.associado_id ? ' (sem associado)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Status</label>

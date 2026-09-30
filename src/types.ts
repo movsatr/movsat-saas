@@ -90,6 +90,7 @@ export interface OrdemServico {
   numero: string;
   associado_id: string;
   rastreador_id: string | null;
+  veiculo_id: string | null;
   prestador_id: string | null;
   tipo: 'instalacao' | 'manutencao' | 'remocao' | 'consultoria';
   status: 'aberta' | 'em_andamento' | 'concluida' | 'cancelada';
