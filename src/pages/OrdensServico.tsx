@@ -99,6 +99,28 @@ export function OrdensServico() {
       payload.data_conclusao = new Date().toISOString().slice(0, 10);
     }
 
+    if (isConcludingInstallation && form.rastreador_id && form.veiculo_id) {
+      const selectedVeiculo = veiculos.find((v) => v.id === form.veiculo_id);
+      if (selectedVeiculo?.rastreador_id && selectedVeiculo.rastreador_id !== form.rastreador_id) {
+        const linkedRast = rastreadores.find((r) => r.id === selectedVeiculo.rastreador_id);
+        toast.error(`O veículo ${selectedVeiculo.placa} já possui o rastreador ${linkedRast?.imei ?? selectedVeiculo.rastreador_id}. Remova o vínculo antes de concluir.`);
+        return;
+      }
+
+      const existingVeiculo = veiculoOfRastreador(form.rastreador_id);
+      if (existingVeiculo && existingVeiculo.id !== form.veiculo_id) {
+        toast.error(`O rastreador já está vinculado ao veículo ${existingVeiculo.placa}. Remova o vínculo antes de concluir.`);
+        return;
+      }
+
+      const selectedRastreador = rastreadores.find((r) => r.id === form.rastreador_id);
+      if (selectedRastreador?.associado_id && selectedRastreador.associado_id !== form.associado_id) {
+        const linkedAssoc = associados.find((a) => a.id === selectedRastreador.associado_id);
+        toast.error(`O rastreador pertence ao associado ${linkedAssoc?.nome ?? selectedRastreador.associado_id}. Não é possível concluir a instalação.`);
+        return;
+      }
+    }
+
     const { error } = editing
       ? await supabase.from('ordens_servico').update(payload).eq('id', editing.id)
       : await supabase.from('ordens_servico').insert(payload);
@@ -140,6 +162,9 @@ export function OrdensServico() {
   const filteredVeiculos = form.associado_id
     ? veiculos.filter((v) => v.associado_id === form.associado_id || !v.associado_id)
     : veiculos;
+
+  const veiculoOfRastreador = (rastreadorId: string): Veiculo | undefined =>
+    veiculos.find((v) => v.rastreador_id === rastreadorId);
 
   const activePrestadores = prestadores.filter((p) => p.status === 'ativo');
 
@@ -220,11 +245,17 @@ export function OrdensServico() {
               <label className="label">Rastreador {form.tipo === 'instalacao' ? '*' : ''}</label>
               <select className="input" disabled={!canEdit || !form.associado_id} value={form.rastreador_id ?? ''} onChange={(e) => setForm({ ...form, rastreador_id: e.target.value || null })}>
                 <option value="">{form.associado_id ? 'Selecione...' : 'Selecione um associado'}</option>
-                {filteredRastreadores.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.imei}{!r.associado_id ? ' (livre)' : ''}
-                  </option>
-                ))}
+                {filteredRastreadores.map((r) => {
+                  const linkedVeic = veiculoOfRastreador(r.id);
+                  const labelParts = [r.imei];
+                  if (!r.associado_id) labelParts.push('(livre)');
+                  if (linkedVeic) labelParts.push(`(veículo: ${linkedVeic.placa})`);
+                  return (
+                    <option key={r.id} value={r.id}>
+                      {labelParts.join(' ')}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div>
@@ -240,11 +271,19 @@ export function OrdensServico() {
               <label className="label">Veículo *</label>
               <select className="input" disabled={!canEdit || !form.associado_id} value={form.veiculo_id ?? ''} onChange={(e) => setForm({ ...form, veiculo_id: e.target.value || null })}>
                 <option value="">{form.associado_id ? 'Selecione...' : 'Selecione um associado'}</option>
-                {filteredVeiculos.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.placa} — {v.modelo} ({v.ano}){!v.associado_id ? ' (sem associado)' : ''}
-                  </option>
-                ))}
+                {filteredVeiculos.map((v) => {
+                  const labelParts = [`${v.placa} — ${v.modelo} (${v.ano})`];
+                  if (!v.associado_id) labelParts.push('(sem associado)');
+                  if (v.rastreador_id) {
+                    const linkedRast = rastreadores.find((r) => r.id === v.rastreador_id);
+                    labelParts.push(`(rastreador: ${linkedRast?.imei ?? '?'})`);
+                  }
+                  return (
+                    <option key={v.id} value={v.id}>
+                      {labelParts.join(' ')}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}
