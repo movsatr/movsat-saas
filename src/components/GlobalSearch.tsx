@@ -67,7 +67,7 @@ export function GlobalSearch() {
       }
       const [a, r, o, e, f, b] = await Promise.all([
         supabase.from('associados').select('id, nome, plano').ilike('nome', `%${safe}%`).limit(5),
-        supabase.from('rastreadores').select('id, imei, veiculo_placa').or(`imei.ilike.%${safe}%,veiculo_placa.ilike.%${safe}%`).limit(5),
+        supabase.from('rastreadores').select('id, imei, veiculo:veiculos(placa)').or(`imei.ilike.%${safe}%,veiculo_placa.ilike.%${safe}%`).limit(5),
         supabase.from('ordens_servico').select('id, numero, tipo').or(`numero.ilike.%${safe}%,descricao.ilike.%${safe}%`).limit(5),
         supabase.from('estoque').select('id, nome, categoria').ilike('nome', `%${safe}%`).limit(5),
         supabase.from('financeiro').select('id, descricao, valor').ilike('descricao', `%${safe}%`).limit(5),
@@ -76,7 +76,7 @@ export function GlobalSearch() {
 
       const all: SearchResult[] = [];
       a.data?.forEach((x) => all.push({ id: x.id, type: 'associado', label: x.nome, sublabel: x.plano, page: 'associados' }));
-      r.data?.forEach((x) => all.push({ id: x.id, type: 'rastreador', label: x.imei, sublabel: x.veiculo_placa || '-', page: 'rastreadores' }));
+      r.data?.forEach((x) => all.push({ id: x.id, type: 'rastreador', label: x.imei, sublabel: x.veiculo?.[0]?.placa || '-', page: 'rastreadores' }));
       o.data?.forEach((x) => all.push({ id: x.id, type: 'ordem', label: `OS ${x.numero}`, sublabel: x.tipo, page: 'ordens' }));
       e.data?.forEach((x) => all.push({ id: x.id, type: 'estoque', label: x.nome, sublabel: x.categoria, page: 'estoque' }));
       f.data?.forEach((x) => all.push({ id: x.id, type: 'financeiro', label: x.descricao, sublabel: `R$ ${x.valor}`, page: 'financeiro' }));

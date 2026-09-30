@@ -43,6 +43,10 @@ export interface Rastreador {
   updated_at: string;
 }
 
+export type RastreadorWithVeiculo = Rastreador & {
+  veiculo?: { id: string; placa: string; modelo: string; ano: number }[] | null;
+};
+
 export interface Veiculo {
   id: string;
   placa: string;

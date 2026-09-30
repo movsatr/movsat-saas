@@ -1,9 +1,9 @@
 import { supabase } from '@/lib/supabase';
-import type { Associado, Rastreador, OrdemServico, FinanceiroRecord, EstoqueItem, Task, EventLog } from '@/types';
+import type { Associado, Rastreador, RastreadorWithVeiculo, OrdemServico, FinanceiroRecord, EstoqueItem, Task, EventLog } from '@/types';
 
 export interface SupervisorData {
   overdueOS: (OrdemServico & { associado_nome?: string })[];
-  offlineTrackers: (Rastreador & { associado_nome?: string })[];
+  offlineTrackers: (RastreadorWithVeiculo & { associado_nome?: string })[];
   riskCustomers: Associado[];
   d7Customers: Associado[];
   d15Customers: Associado[];
@@ -24,7 +24,7 @@ function daysSince(date: string): number {
 export async function loadSupervisorData(): Promise<SupervisorData> {
   const [osRes, trackerRes, custRes, stockRes, finRes, eventsRes, tasksRes] = await Promise.all([
     supabase.from('ordens_servico').select('*, associado:associados!inner(nome)').in('status', ['aberta', 'em_andamento']).order('data_abertura', { ascending: true }),
-    supabase.from('rastreadores').select('*, associado:associados!inner(nome)').in('status', ['com_problema', 'inativo']),
+    supabase.from('rastreadores').select('*, associado:associados!inner(nome), veiculo:veiculos(placa,modelo)').in('status', ['com_problema', 'inativo']),
     supabase.from('associados').select('*'),
     supabase.from('estoque').select('*'),
     supabase.from('financeiro').select('*, associado:associados!inner(nome)').in('status', ['pendente', 'atrasado']),
@@ -38,8 +38,8 @@ export async function loadSupervisorData(): Promise<SupervisorData> {
     .map((o) => ({ ...o, associado_nome: o.associado?.nome }))
     .sort((a, b) => daysSince(b.data_abertura) - daysSince(a.data_abertura));
 
-  const allTrackers = (trackerRes.data || []) as unknown as (Rastreador & { associado: { nome: string } })[];
-  const offlineTrackers = allTrackers.map((t) => ({ ...t, associado_nome: t.associado?.nome }));
+  const allTrackers = (trackerRes.data || []) as unknown as (RastreadorWithVeiculo & { associado: { nome: string } })[];
+  const offlineTrackers = allTrackers.map((t) => ({ ...t, associado_nome: t.associado?.nome, veiculo_placa: t.veiculo?.[0]?.placa ?? t.veiculo_placa }));
 
   const customers = (custRes.data || []) as Associado[];
   const riskCustomers = customers.filter((c) => c.status_pagamento === 'inadimplente' || c.status_equipamento === 'com_problema');

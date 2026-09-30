@@ -8,9 +8,9 @@ import { DataTable, PageHeader, type Column } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, formatDate } from '@/components/ui';
-import type { Rastreador, Associado } from '@/types';
+import type { Rastreador, RastreadorWithVeiculo, Associado, Veiculo } from '@/types';
 
-type RastreadorWithAssoc = Rastreador & { associado?: { nome: string } | null };
+type RastreadorWithAssoc = RastreadorWithVeiculo & { associado?: { nome: string } | null };
 
 export function Rastreadores() {
   const { profile } = useAuth();
@@ -20,19 +20,27 @@ export function Rastreadores() {
 
   const [data, setData] = useState<RastreadorWithAssoc[]>([]);
   const [associados, setAssociados] = useState<Associado[]>([]);
+  const [veiculos, setVeiculos] = useState<Veiculo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<RastreadorWithAssoc | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RastreadorWithAssoc | null>(null);
   const [form, setForm] = useState<Partial<Rastreador>>({});
+  const [selectedVeiculoId, setSelectedVeiculoId] = useState<string | null>(null);
 
   const loadData = async () => {
-    const [rastRes, assocRes] = await Promise.all([
-      supabase.from('rastreadores').select('*, associado:associados(nome)').order('imei'),
+    const [rastRes, assocRes, veicRes] = await Promise.all([
+      supabase.from('rastreadores').select('*, associado:associados(nome), veiculo:veiculos(id,placa,modelo,ano)').order('imei'),
       supabase.from('associados').select('id, nome').order('nome'),
+      supabase.from('veiculos').select('id, placa, modelo, ano, rastreador_id').order('placa'),
     ]);
-    setData((rastRes.data || []) as RastreadorWithAssoc[]);
+    setData((rastRes.data || []).map((r: Record<string, unknown>) => {
+      const veicArr = r.veiculo as { id?: string; placa?: string; modelo?: string; ano?: number }[] | null;
+      const veic = veicArr?.[0];
+      return { ...r, veiculo_placa: veic?.placa ?? r.veiculo_placa, veiculo_modelo: veic?.modelo ?? r.veiculo_modelo };
+    }) as RastreadorWithAssoc[]);
     setAssociados((assocRes.data || []) as Associado[]);
+    setVeiculos((veicRes.data || []) as Veiculo[]);
     setLoading(false);
   };
 
@@ -40,14 +48,16 @@ export function Rastreadores() {
 
   const openCreate = () => {
     setForm({ status: 'ativo', data_instalacao: new Date().toISOString().slice(0, 10) });
+    setSelectedVeiculoId(null);
     setCreating(true);
     setEditing(null);
   };
 
   const openEdit = (row: RastreadorWithAssoc) => {
-    const { associado, ...rest } = row;
-    void associado;
+    const { associado, veiculo, ...rest } = row;
+    void associado; void veiculo;
     setForm(rest);
+    setSelectedVeiculoId(row.veiculo?.[0]?.id ?? null);
     setEditing(row);
     setCreating(false);
   };
@@ -56,6 +66,11 @@ export function Rastreadores() {
     setCreating(false);
     setEditing(null);
     setForm({});
+    setSelectedVeiculoId(null);
+  };
+
+  const handleVeiculoChange = (veiculoId: string | null) => {
+    setSelectedVeiculoId(veiculoId);
   };
 
   const handleSave = async () => {
@@ -65,13 +80,32 @@ export function Rastreadores() {
     delete payload.id;
     delete payload.created_at;
     delete payload.updated_at;
+    delete payload.veiculo;
+    delete payload.veiculo_placa;
+    delete payload.veiculo_modelo;
+    delete payload.veiculo_cor;
     Object.keys(payload).forEach((k) => { if (payload[k] === '') payload[k] = null; });
 
-    const { error } = editing
-      ? await supabase.from('rastreadores').update(payload).eq('id', editing.id)
-      : await supabase.from('rastreadores').insert(payload);
+    let rastreadorId: string;
 
-    if (error) { toast.error(friendlyError(error, 'rastreadores')); return; }
+    if (editing) {
+      const { error } = await supabase.from('rastreadores').update(payload).eq('id', editing.id);
+      if (error) { toast.error(friendlyError(error, 'rastreadores')); return; }
+      rastreadorId = editing.id;
+    } else {
+      const { data: inserted, error } = await supabase.from('rastreadores').insert(payload).select('id').single();
+      if (error) { toast.error(friendlyError(error, 'rastreadores')); return; }
+      rastreadorId = inserted.id;
+    }
+
+    const previousVeiculoId = editing?.veiculo?.[0]?.id ?? null;
+    if (previousVeiculoId && previousVeiculoId !== selectedVeiculoId) {
+      await supabase.from('veiculos').update({ rastreador_id: null }).eq('id', previousVeiculoId);
+    }
+    if (selectedVeiculoId && selectedVeiculoId !== previousVeiculoId) {
+      await supabase.from('veiculos').update({ rastreador_id: rastreadorId }).eq('id', selectedVeiculoId);
+    }
+
     toast.success(editing ? 'Rastreador atualizado com sucesso' : 'Rastreador criado com sucesso');
     closeDrawer();
     loadData();
@@ -90,8 +124,8 @@ export function Rastreadores() {
     { key: 'imei', header: 'IMEI', sortable: true, render: (r) => <span className="font-mono text-xs font-medium text-slate-900 dark:text-white">{r.imei}</span> },
     { key: 'modelo', header: 'Modelo', sortable: true, render: (r) => r.modelo },
     { key: 'associado', header: 'Associado', sortable: true, sortValue: (r) => r.associado?.nome ?? '', render: (r) => r.associado?.nome || <span className="text-slate-400">—</span> },
-    { key: 'veiculo_placa', header: 'Placa', render: (r) => r.veiculo_placa ? <span className="font-mono text-xs uppercase">{r.veiculo_placa}</span> : '-' },
-    { key: 'veiculo_modelo', header: 'Veículo', render: (r) => [r.veiculo_modelo, r.veiculo_cor].filter(Boolean).join(' ') || '-' },
+    { key: 'veiculo', header: 'Placa', sortable: true, sortValue: (r) => r.veiculo?.[0]?.placa ?? '', render: (r) => r.veiculo?.[0] ? <span className="font-mono text-xs uppercase">{r.veiculo[0].placa}</span> : '-' },
+    { key: 'veiculo_modelo', header: 'Veículo', sortable: true, sortValue: (r) => r.veiculo?.[0]?.modelo ?? '', render: (r) => r.veiculo?.[0] ? [r.veiculo[0].modelo, r.veiculo[0].ano].filter(Boolean).join(' — ') : '-' },
     { key: 'status', header: 'Status', sortable: true, render: (r) => <StatusBadge status={r.status} /> },
     { key: 'data_instalacao', header: 'Instalação', sortable: true, sortValue: (r) => r.data_instalacao ?? '', render: (r) => formatDate(r.data_instalacao) },
     {
@@ -150,19 +184,12 @@ export function Rastreadores() {
               {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="label">Placa</label>
-              <input className="input font-mono uppercase" disabled={!canEdit} value={form.veiculo_placa ?? ''} onChange={(e) => setForm({ ...form, veiculo_placa: e.target.value.toUpperCase() })} placeholder="ABC-1234" />
-            </div>
-            <div>
-              <label className="label">Modelo do Veículo</label>
-              <input className="input" disabled={!canEdit} value={form.veiculo_modelo ?? ''} onChange={(e) => setForm({ ...form, veiculo_modelo: e.target.value })} placeholder="Honda Civic" />
-            </div>
-            <div>
-              <label className="label">Cor</label>
-              <input className="input" disabled={!canEdit} value={form.veiculo_cor ?? ''} onChange={(e) => setForm({ ...form, veiculo_cor: e.target.value })} placeholder="Prata" />
-            </div>
+          <div>
+            <label className="label">Veículo vinculado</label>
+            <select className="input" disabled={!canEdit} value={selectedVeiculoId ?? ''} onChange={(e) => handleVeiculoChange(e.target.value || null)}>
+              <option value="">Sem veículo</option>
+              {veiculos.map((v) => <option key={v.id} value={v.id}>{v.placa} — {v.modelo} ({v.ano})</option>)}
+            </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
