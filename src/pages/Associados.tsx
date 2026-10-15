@@ -25,6 +25,40 @@ export function Associados() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Associado | null>(null);
   const [form, setForm] = useState<Partial<Associado>>({});
+  const [atlasContracts, setAtlasContracts] = useState<Record<string, unknown>[]>([]);
+  const [atlasLoading, setAtlasLoading] = useState(false);
+  const [atlasError, setAtlasError] = useState<string | null>(null);
+
+  const loadAtlasContracts = async () => {
+    if (role !== 'administrador') return;
+    setAtlasLoading(true);
+    setAtlasError(null);
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (sessionError || !token) throw new Error('Sess?o inv?lida. Entre novamente.');
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api?resource=contracts&page=1&page_size=10`,
+        {
+          headers: {
+            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+      const payload = await response.json();
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || 'Falha ao consultar contratos Atlas.');
+      }
+      const result = payload?.data;
+      setAtlasContracts(Array.isArray(result?.results) ? result.results : []);
+    } catch (error) {
+      setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar contratos Atlas.');
+    } finally {
+      setAtlasLoading(false);
+    }
+  };
 
   const loadData = async () => {
     const { data: rows } = await supabase.from('associados').select('*').order('nome');
@@ -33,6 +67,7 @@ export function Associados() {
   };
 
   useEffect(() => { loadData(); }, []);
+  useEffect(() => { if (role === 'administrador') loadAtlasContracts(); }, [role]);
 
   const openCreate = () => {
     setForm({
