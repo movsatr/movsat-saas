@@ -179,7 +179,7 @@ export function Associados() {
                 {atlasContracts.map((contract, index) => (
                   <tr key={String(contract.id ?? index)} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="p-2">{String(contract.id ?? contract.contract_id ?? '—')}</td>
-                    <td className="p-2">{String(contract.person_id ?? contract.name ?? '—')}</td>
+                    <td className="p-2">{String((contract.person as Record<string, unknown> | undefined)?.name ?? (contract.person as Record<string, unknown> | undefined)?.full_name ?? contract.person_name ?? contract.person_full_name ?? contract.name ?? (contract.person_id != null ? `Pessoa #${contract.person_id}` : '—'))}</td>
                     <td className="p-2">{String(contract.contract_status ?? contract.status ?? '—')}</td>
                     <td className="p-2">{String(contract.contract_date ?? contract.created_at ?? '—')}</td>
                   </tr>
