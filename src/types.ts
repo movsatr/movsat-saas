@@ -47,6 +47,25 @@ export type RastreadorWithVeiculo = Rastreador & {
   veiculo?: { id: string; placa: string; modelo: string; ano: number }[] | null;
 };
 
+export type AssociadoWithRelations = Associado & {
+  rastreadores: {
+    id: string;
+    imei: string;
+    modelo: string | null;
+    status: string;
+    data_instalacao: string | null;
+    veiculo: { id: string; placa: string; modelo: string; ano: number }[] | null;
+  }[];
+  veiculos: {
+    id: string;
+    placa: string;
+    modelo: string;
+    ano: number;
+    rastreador_id: string | null;
+    status: string;
+  }[];
+};
+
 export interface Veiculo {
   id: string;
   placa: string;
