@@ -36,7 +36,7 @@ export function Associados() {
     try {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
-      if (sessionError || !token) throw new Error('Sess?o inv?lida. Entre novamente.');
+      if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente.');
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api?resource=contracts&page=1&page_size=10`,
@@ -150,6 +150,48 @@ export function Associados() {
         subtitle="Gestão de clientes e mensalidades"
         action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Associado</Button> : undefined}
       />
+      {role === 'administrador' && (
+        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Contratos Atlas</h2>
+              <p className="text-sm text-slate-500">Contratos retornados pela API Atlas</p>
+            </div>
+            <Button onClick={loadAtlasContracts} disabled={atlasLoading}>
+              {atlasLoading ? 'Carregando...' : 'Atualizar'}
+            </Button>
+          </div>
+          {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
+          {!atlasLoading && !atlasError && (
+            <p className="mb-3 text-sm text-slate-500">{atlasContracts.length} contratos nesta página.</p>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="p-2">Contrato</th>
+                  <th className="p-2">Pessoa</th>
+                  <th className="p-2">Status</th>
+                  <th className="p-2">Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                {atlasContracts.map((contract, index) => (
+                  <tr key={String(contract.id ?? index)} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="p-2">{String(contract.id ?? contract.contract_id ?? '—')}</td>
+                    <td className="p-2">{String(contract.person_id ?? contract.name ?? '—')}</td>
+                    <td className="p-2">{String(contract.contract_status ?? contract.status ?? '—')}</td>
+                    <td className="p-2">{String(contract.contract_date ?? contract.created_at ?? '—')}</td>
+                  </tr>
+                ))}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && (
+                  <tr><td className="p-3 text-slate-500" colSpan={4}>Nenhum contrato retornado.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <DataTable
         data={data}
         columns={columns}
