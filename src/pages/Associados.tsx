@@ -100,61 +100,20 @@ export function Associados() {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente.');
-
-      const headers = {
-        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${token}`,
-      };
+      const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
-      const response = await fetch(
-        `${baseUrl}?resource=contracts&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
-        { headers }
-      );
+      const response = await fetch(`${baseUrl}?resource=softruck_contract_objects&page=${page}&page_size=${ATLAS_PAGE_SIZE}`, { headers });
       const payload = await response.json();
-      if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.error || 'Falha ao consultar contratos Atlas.');
-      }
-
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || 'Falha ao consultar associados rastreados da Atlas.');
       const result = payload?.data;
-      const contracts = Array.isArray(result?.results) ? result.results as Record<string, unknown>[] : [];
-      setAtlasContracts(contracts);
+      const rows = Array.isArray(result?.results) ? result.results as Record<string, unknown>[] : Array.isArray(result) ? result as Record<string, unknown>[] : [];
+      setAtlasContracts(rows);
       setAtlasPage(page);
-      setAtlasCount(Number(result?.count ?? 0));
-
-      // A API de contratos retorna person_id, não o nome. Busca cada pessoa única
-      // desta página e guarda os resultados pelo ID para exibir o nome real.
-      const personIds = [...new Set(contracts
-        .map((contract) => contract.person_id)
-        .filter((id): id is string | number => typeof id === 'string' || typeof id === 'number')
-        .map(String))];
-      const peopleEntries = await Promise.all(personIds.map(async (personId) => {
-        try {
-          const personResponse = await fetch(
-            `${baseUrl}?resource=person&id=${encodeURIComponent(personId)}`,
-            { headers }
-          );
-          const personPayload = await personResponse.json();
-          if (!personResponse.ok || personPayload?.ok === false) return [personId, {}] as const;
-          const personData = personPayload?.data;
-          const people = Array.isArray(personData?.results)
-            ? personData.results
-            : personData && typeof personData === 'object' && !Array.isArray(personData)
-              ? [personData]
-              : [];
-          const person = (people as Record<string, unknown>[]).find((item) => String(item.id) === personId)
-            ?? (people as Record<string, unknown>[])[0]
-            ?? {};
-          return [personId, person] as const;
-        } catch {
-          return [personId, {}] as const;
-        }
-      }));
-      setAtlasPeople((previous) => ({ ...previous, ...Object.fromEntries(peopleEntries) }));
+      setAtlasCount(Number(result?.count ?? rows.length));
+      setAtlasPeople({});
     } catch (error) {
-      setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar contratos Atlas.');
-    } finally {
-      setAtlasLoading(false);
-    }
+      setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
+    } finally { setAtlasLoading(false); }
   };
 
   useEffect(() => { loadData(); }, []);
@@ -255,41 +214,58 @@ export function Associados() {
       />
 
       {role === 'administrador' && (
-        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-3">
-            <h2 className="text-lg font-semibold">Associados MovSat com rastreador</h2>
-            <p className="text-sm text-slate-500">Lista filtrada pelos vínculos reais de rastreadores no banco MovSat. Os nomes vêm do cadastro local, não do retorno genérico de contratos Atlas.</p>
+        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">Frota rastreada — Atlas</h2>
+              <p className="mt-1 text-sm text-slate-500">Associados e veículos retornados pelo endpoint exclusivo da Softruck na API Atlas.</p>
+            </div>
+            <Button onClick={() => loadAtlasContracts(1)} disabled={atlasLoading}>{atlasLoading ? 'Atualizando…' : 'Atualizar'}</Button>
           </div>
-          <div className="mb-3 flex flex-wrap gap-4 text-sm font-medium text-slate-700 dark:text-slate-300">
-            <span>{associadosComRastreador.length} associados com rastreador</span>
-            <span>{totalRastreadoresVinculados} rastreadores vinculados</span>
-          </div>
+          {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
+          {!atlasError && (
+            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+                <p className="text-xs text-slate-500">Registros de rastreamento</p>
+                <p className="mt-1 text-xl font-semibold">{atlasCount.toLocaleString('pt-BR')}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+                <p className="text-xs text-slate-500">Associados nesta página</p>
+                <p className="mt-1 text-xl font-semibold">{new Set(atlasContracts.map((row) => String(((row.person_data ?? {}) as Record<string, unknown>).id ?? ''))).size}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+                <p className="text-xs text-slate-500">Veículos identificados</p>
+                <p className="mt-1 text-xl font-semibold">{atlasContracts.filter((row) => Boolean(((row.vehicle_data ?? {}) as Record<string, unknown>).plate)).length}</p>
+              </div>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <th className="p-2">Nome exato no MovSat</th>
-                  <th className="p-2">CPF/CNPJ</th>
-                  <th className="p-2">Telefone</th>
-                  <th className="p-2">Rastreadores</th>
-                  <th className="p-2">IMEs</th>
-                </tr>
-              </thead>
+              <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
+                <th className="px-3 py-3">Associado Atlas</th><th className="px-3 py-3">CPF/CNPJ</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato</th><th className="px-3 py-3">Status</th>
+              </tr></thead>
               <tbody>
-                {associadosComRastreador.map((associado) => (
-                  <tr key={associado.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="p-2 font-medium">{associado.nome}</td>
-                    <td className="p-2">{associado.cpf_cnpj || '—'}</td>
-                    <td className="p-2">{associado.telefone || '—'}</td>
-                    <td className="p-2">{associado.rastreadores.length}</td>
-                    <td className="p-2 font-mono text-xs">{associado.rastreadores.map((rastreador) => rastreador.imei).join(', ') || '—'}</td>
-                  </tr>
-                ))}
-                {associadosComRastreador.length === 0 && (
-                  <tr><td className="p-3 text-slate-500" colSpan={5}>Nenhum associado possui rastreador vinculado no MovSat.</td></tr>
-                )}
+                {atlasContracts.map((row, index) => {
+                  const person = (row.person_data ?? {}) as Record<string, unknown>;
+                  const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
+                  const contract = (row.contract_data ?? {}) as Record<string, unknown>;
+                  return <tr key={String(row.id ?? index)} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="px-3 py-3 font-medium">{String(person.name ?? 'Nome não informado pela API')}</td>
+                    <td className="px-3 py-3">{String(person.cpf_cnpj ?? '—')}</td>
+                    <td className="px-3 py-3 font-mono">{String(vehicle.plate ?? '—')}</td>
+                    <td className="px-3 py-3">{[vehicle.assembler, vehicle.model].filter(Boolean).join(' ') || '—'}</td>
+                    <td className="px-3 py-3">{String(contract.contract_id ?? '—')}</td>
+                    <td className="px-3 py-3">{String(contract.contract_status ?? '—')}</td>
+                  </tr>;
+                })}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>A API não retornou objetos rastreados para esta consulta.</td></tr>}
               </tbody>
             </table>
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <Button variant="secondary" disabled={atlasLoading || atlasPage <= 1} onClick={() => loadAtlasContracts(atlasPage - 1)}>Anterior</Button>
+            <span className="text-xs text-slate-500">Página {atlasPage} / {Math.max(1, Math.ceil(atlasCount / ATLAS_PAGE_SIZE))}</span>
+            <Button variant="secondary" disabled={atlasLoading || atlasPage >= Math.ceil(atlasCount / ATLAS_PAGE_SIZE)} onClick={() => loadAtlasContracts(atlasPage + 1)}>Próxima</Button>
           </div>
         </section>
       )}
