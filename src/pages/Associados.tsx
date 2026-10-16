@@ -37,6 +37,7 @@ export function Associados() {
   const [atlasError, setAtlasError] = useState<string | null>(null);
   const [atlasPage, setAtlasPage] = useState(1);
   const [atlasCount, setAtlasCount] = useState(0);
+  const [atlasTotalPages, setAtlasTotalPages] = useState(1);
   const ATLAS_PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -99,42 +100,120 @@ export function Associados() {
       if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente.');
       const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
+
       const readRows = (payload: any): Record<string, unknown>[] => {
         const root = payload?.data;
         const body = root?.data ?? root;
         const rows = body?.results ?? body?.items ?? body;
         return Array.isArray(rows) ? rows : [];
       };
+      const readCount = (payload: any): number => {
+        const root = payload?.data;
+        const body = root?.data ?? root;
+        const count = Number(body?.count ?? body?.total ?? 0);
+        return Number.isFinite(count) ? count : 0;
+      };
+      const readResource = async (url: string, fallbackMessage: string) => {
+        const response = await fetch(url, { headers });
+        const payload = await response.json();
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(payload?.error || fallbackMessage);
+        }
+        return payload;
+      };
 
-      // Usa o endpoint Softruck, que responde normalmente, para obter os objetos e então confere o produto vinculado.
-      const objectResponse = await fetch(`${baseUrl}?resource=softruck_contract_objects&page=${page}&page_size=${ATLAS_PAGE_SIZE}`, { headers });
-      const objectPayload = await objectResponse.json();
-      if (!objectResponse.ok || objectPayload?.ok === false) throw new Error(objectPayload?.error || 'Falha ao consultar objetos de contrato da Atlas.');
-      const objects = readRows(objectPayload);
+      // A lista Softruck é exclusiva desse fornecedor e pode retornar zero.
+      // Partimos dos contratos, consultamos os produtos vinculados e só então buscamos os veículos.
+      const contractPayload = await readResource(
+        `${baseUrl}?resource=contracts&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
+        'Falha ao consultar contratos da Atlas.'
+      );
+      const contracts = readRows(contractPayload);
+      const contractCount = readCount(contractPayload);
 
-      // Só mantém objetos cujo produto vinculado seja o Rastreador (código comercial 0013).
-      const checked = await Promise.all(objects.map(async (object) => {
-        const objectId = object.id;
-        if (objectId == null) return null;
-        const productResponse = await fetch(`${baseUrl}?resource=contract_object_product&contract_object_id=${encodeURIComponent(String(objectId))}&page_size=100`, { headers });
-        const productPayload = await productResponse.json();
-        if (!productResponse.ok || productPayload?.ok === false) throw new Error(productPayload?.error || 'Falha ao consultar produtos dos contratos Atlas.');
+      const productsByContract = await Promise.all(contracts.map(async (contract) => {
+        const contractId = contract.id;
+        if (contractId == null) return { contract, products: [] as Record<string, unknown>[] };
+        const productPayload = await readResource(
+          `${baseUrl}?resource=contract_object_product&contract_id=${encodeURIComponent(String(contractId))}&page_size=100`,
+          'Falha ao consultar produtos dos contratos Atlas.'
+        );
         const products = readRows(productPayload);
-        const hasTracker = products.some((product) => {
-          const id = String(product.product_id ?? '').trim();
-          const code = String(product.product_code ?? product.code ?? product.product?.code ?? '').trim();
-          return id === '13' || id === '0013' || code === '13' || code === '0013';
-        });
-        if (!hasTracker) return null;
-        return object;
+        return { contract, products };
       }));
-      const trackerObjects = checked.filter((row): row is Record<string, unknown> => row !== null);
+
+      const matchingObjects = productsByContract.flatMap(({ contract, products }) => {
+        const trackerProducts = products.filter((product) => {
+          const productId = String(product.product_id ?? '').trim();
+          const productCode = String(
+            product.product_code ?? product.code ?? product.product?.code ?? product.product_data?.code ?? ''
+          ).trim();
+          // Na resposta de vínculo da API só há product_id; o código 0013 corresponde ao ID 13.
+          return productId === '13' || productId === '0013' || productCode === '0013';
+        });
+        return trackerProducts
+          .filter((product) => product.contract_object_id != null)
+          .map((product) => ({
+            contractId: contract.id,
+            objectId: String(product.contract_object_id),
+            contract,
+          }));
+      });
+
+      const byContract = new Map<string, typeof matchingObjects>();
+      matchingObjects.forEach((item) => {
+        const key = String(item.contractId);
+        const existing = byContract.get(key) ?? [];
+        existing.push(item);
+        byContract.set(key, existing);
+      });
+
+      const vehicleRows = await Promise.all(Array.from(byContract.entries()).map(async ([contractId, items]) => {
+        const objectPayload = await readResource(
+          `${baseUrl}?resource=contract_object_vehicle&contract_id=${encodeURIComponent(contractId)}&page_size=100`,
+          'Falha ao consultar veículos vinculados aos contratos Atlas.'
+        );
+        const objects = readRows(objectPayload);
+        const wantedIds = new Set(items.map((item) => item.objectId));
+        return objects
+          .filter((row) => wantedIds.has(String(row.id ?? '')))
+          .map((row) => {
+            const person = (row.person_data ?? {}) as Record<string, unknown>;
+            const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
+            const contract = (row.contract_data ?? items[0]?.contract ?? {}) as Record<string, unknown>;
+            return {
+              ...row,
+              person_data: {
+                ...person,
+                name: person.name ?? row.person_name ?? row.name,
+                cpf_cnpj: person.cpf_cnpj ?? row.person_cpf_cnpj,
+              },
+              vehicle_data: {
+                ...vehicle,
+                plate: vehicle.plate ?? row.vehicle_plate,
+                assembler: vehicle.assembler ?? row.vehicle_assembler,
+                model: vehicle.model ?? row.vehicle_model,
+              },
+              contract_data: {
+                ...contract,
+                contract_id: contract.contract_id ?? row.contract_id,
+                contract_status: contract.contract_status ?? row.contract_status,
+              },
+              product_code: '0013',
+            } as Record<string, unknown>;
+          });
+      }));
+
+      const trackerObjects = vehicleRows.flat();
       setAtlasContracts(trackerObjects);
       setAtlasPage(page);
       setAtlasCount(trackerObjects.length);
+      setAtlasTotalPages(Math.max(1, Math.ceil(contractCount / ATLAS_PAGE_SIZE)));
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
-    } finally { setAtlasLoading(false); }
+    } finally {
+      setAtlasLoading(false);
+    }
   };
 
   useEffect(() => { loadData(); }, []);
@@ -285,8 +364,8 @@ export function Associados() {
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
             <Button variant="secondary" disabled={atlasLoading || atlasPage <= 1} onClick={() => loadAtlasContracts(atlasPage - 1)}>Anterior</Button>
-            <span className="text-xs text-slate-500">Página {atlasPage} / {Math.max(1, Math.ceil(atlasCount / ATLAS_PAGE_SIZE))}</span>
-            <Button variant="secondary" disabled={atlasLoading || atlasPage >= Math.ceil(atlasCount / ATLAS_PAGE_SIZE)} onClick={() => loadAtlasContracts(atlasPage + 1)}>Próxima</Button>
+            <span className="text-xs text-slate-500">Página {atlasPage} / {atlasTotalPages}</span>
+            <Button variant="secondary" disabled={atlasLoading || atlasPage >= atlasTotalPages} onClick={() => loadAtlasContracts(atlasPage + 1)}>Próxima</Button>
           </div>
         </section>
       )}
