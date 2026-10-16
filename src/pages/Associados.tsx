@@ -328,7 +328,7 @@ export function Associados() {
               <h2 className="text-base font-semibold text-slate-900 dark:text-white">Frota rastreada — Atlas</h2>
               <p className="mt-1 text-sm text-slate-500">Veículos da Atlas com produto Rastreador (0013), sem filtro por fornecedor.</p>
             </div>
-            <Button onClick={() => loadAtlasContracts(1)} disabled={atlasLoading}>{atlasLoading ? 'Atualizando…' : 'Atualizar'}</Button>
+            <Button onClick={() => loadAtlasContracts(atlasError ? Math.min(atlasPage + 1, atlasTotalPages) : 1)} disabled={atlasLoading || (Boolean(atlasError) && atlasPage >= atlasTotalPages)}>{atlasLoading ? 'Buscando…' : atlasError ? 'Buscar próxima página' : 'Atualizar'}</Button>
           </div>
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {!atlasError && (
