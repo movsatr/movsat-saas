@@ -132,7 +132,7 @@ export function Associados() {
       // Não limita por fornecedor. O produto é validado pelo vínculo contract_object_id.
       for (let scanned = 0; scanned < MAX_PAGES_PER_REFRESH && scanPage <= totalObjectPages; scanned++, scanPage++) {
         const objectsPayload = await readResource(
-          `${baseUrl}?resource=contract_object_nested&page=${scanPage}&page_size=${ATLAS_PAGE_SIZE}`,
+          `${baseUrl}?resource=softruck_contract_objects&page=${scanPage}&page_size=${ATLAS_PAGE_SIZE}`,
           'Falha ao consultar a lista de objetos da Atlas.'
         );
         const objects = readRows(objectsPayload);
