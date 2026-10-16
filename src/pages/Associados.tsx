@@ -101,42 +101,59 @@ export function Associados() {
       const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
       const currentPage = Math.max(1, page);
-      const response = await fetch(
-        `${baseUrl}?resource=softruck_contract_objects&page=${currentPage}&page_size=${ATLAS_PAGE_SIZE}`,
-        { headers, signal: AbortSignal.timeout(35000) }
-      );
-      const payload = await response.json();
-      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || 'Falha ao consultar objetos rastreados da Atlas.');
+      const params = `page=${currentPage}&page_size=${ATLAS_PAGE_SIZE}`;
+      const [productsResponse, objectsResponse] = await Promise.all([
+        fetch(`${baseUrl}?resource=contract_object_product&product_id=13&${params}`, { headers, signal: AbortSignal.timeout(35000) }),
+        fetch(`${baseUrl}?resource=contract_object_nested&object_type=VEHICLE&${params}`, { headers, signal: AbortSignal.timeout(35000) }),
+      ]);
+      const [productsPayload, objectsPayload] = await Promise.all([productsResponse.json(), objectsResponse.json()]);
+      if (!productsResponse.ok || productsPayload?.ok === false) throw new Error(productsPayload?.error || 'Falha ao consultar produtos de rastreamento da Atlas.');
+      if (!objectsResponse.ok || objectsPayload?.ok === false) throw new Error(objectsPayload?.error || 'Falha ao consultar objetos e associados da Atlas.');
 
-      const root = payload?.data;
-      const body = root?.data ?? root;
-      const rows = Array.isArray(body) ? body : body?.results ?? body?.items ?? body?.data ?? [];
-      const safeRows = Array.isArray(rows) ? rows as Record<string, unknown>[] : [];
-      const count = Number(body?.count ?? body?.total ?? safeRows.length);
-      const totalPages = Math.max(1, Math.ceil((Number.isFinite(count) ? count : safeRows.length) / ATLAS_PAGE_SIZE));
-      const found = safeRows
-        .filter((row) => row.deleted !== true)
+      const rowsFrom = (payload: any): Record<string, unknown>[] => {
+        const root = payload?.data;
+        const body = root?.data ?? root;
+        const rows = Array.isArray(body) ? body : body?.results ?? body?.items ?? body?.data ?? [];
+        return Array.isArray(rows) ? rows as Record<string, unknown>[] : [];
+      };
+      const pageInfo = (payload: any, rowCount: number) => {
+        const root = payload?.data;
+        const body = root?.data ?? root;
+        const count = Number(body?.count ?? body?.total ?? rowCount);
+        const next = body?.next;
+        return { count: Number.isFinite(count) ? count : rowCount, hasNext: Boolean(next) };
+      };
+      const productRows = rowsFrom(productsPayload).filter((row) => row.deleted !== true && row.activated !== false);
+      const objectRows = rowsFrom(objectsPayload);
+      const trackedIds = new Set(productRows.map((row) => String(row.contract_object_id ?? row.object_id ?? '')).filter(Boolean));
+      const found = objectRows
+        .filter((row) => row.deleted !== true && (!row.object_type || row.object_type === 'VEHICLE'))
+        .filter((row) => trackedIds.has(String(row.id ?? '')))
         .map((row) => {
-          const contract = (row.contract_data ?? {}) as Record<string, unknown>;
-          return {
-            ...row,
-            person_data: row.person_data ?? {},
-            vehicle_data: row.vehicle_data ?? {},
-            contract_data: {
-              ...contract,
-              contract_id: contract.contract_id ?? row.contract_id ?? '—',
-              contract_status: contract.contract_status ?? row.contract_status ?? '—',
-            },
-            product_code: 'SOFTRUCK',
+          const person = (row.person_data ?? {}) as Record<string, unknown>;
+          const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
+          const contract = {
+            contract_id: row.contract_id ?? '—',
+            contract_status: row.contract_status ?? '—',
           };
+          return { ...row, person_data: person, vehicle_data: vehicle, contract_data: contract, product_code: '0013' };
         })
         .sort((a, b) => String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '').localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')));
 
+      const productsPage = pageInfo(productsPayload, productRows.length);
+      const objectsPage = pageInfo(objectsPayload, objectRows.length);
+      const totalPages = Math.max(1, Math.max(
+        Math.ceil(productsPage.count / ATLAS_PAGE_SIZE),
+        Math.ceil(Number((objectsPayload?.data?.count ?? objectsPayload?.data?.data?.count ?? objectsPage.count)) / ATLAS_PAGE_SIZE),
+      ));
       setAtlasContracts(found);
       setAtlasPage(currentPage);
       setAtlasCount(found.length);
       setAtlasTotalPages(totalPages);
-      if (found.length === 0) setAtlasError(`A rota Softruck respondeu, mas não retornou veículos na página ${currentPage}. Avance a página para continuar a busca.`);
+      if (found.length === 0) {
+        const detail = `Produtos 0013: ${productRows.length} registros nesta página; objetos: ${objectRows.length}.`;
+        setAtlasError(`A Atlas respondeu, mas não foi possível cruzar produtos 0013 com objetos de veículos na página ${currentPage}. ${detail} Isso evita exibir veículos sem confirmar o produto de rastreamento.`);
+      }
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally {
