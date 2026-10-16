@@ -122,69 +122,81 @@ export function Associados() {
         return payload;
       };
 
-      // A lista de contratos traz IDs antigos que não representam a frota atual.
-      // Usamos os objetos de veículo e consultamos diretamente o vínculo do produto 0013 por objeto.
-      const objectsPayload = await readResource(
-        `${baseUrl}?resource=contract_object_vehicle&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
-        'Falha ao consultar objetos/veículos dos contratos Atlas.'
+      // Busca diretamente os vínculos do produto Rastreador (ID 13 / código comercial 0013).
+      // Assim não dependemos de uma listagem geral de contratos/veículos que está expirando.
+      const productPayload = await readResource(
+        `${baseUrl}?resource=contract_object_product&product_id=13&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
+        'Falha ao consultar vínculos do produto Rastreador (0013) na Atlas.'
       );
-      const objects = readRows(objectsPayload);
-      const objectCount = readCount(objectsPayload);
+      const productRows = readRows(productPayload).filter((product) => {
+        const productId = String(product.product_id ?? '').trim();
+        return (productId === '13' || productId === '0013') && product.deleted !== true;
+      });
+      const totalCount = readCount(productPayload);
+
+      const objectIds = Array.from(new Set(
+        productRows
+          .map((product) => product.contract_object_id)
+          .filter((id) => id != null)
+          .map((id) => String(id))
+      ));
+
+      const objectDetails: Record<string, unknown>[] = [];
       let nextIndex = 0;
-      const matched: Record<string, unknown>[] = [];
       const worker = async () => {
         while (true) {
           const currentIndex = nextIndex++;
-          if (currentIndex >= objects.length) return;
-          const row = objects[currentIndex];
-          if (row.id == null) continue;
-
-          const productPayload = await readResource(
-            `${baseUrl}?resource=contract_object_product&contract_object_id=${encodeURIComponent(String(row.id))}&product_id=13&page_size=100`,
-            'Falha ao consultar o produto 0013 dos objetos Atlas.'
+          if (currentIndex >= objectIds.length) return;
+          const objectId = objectIds[currentIndex];
+          const objectPayload = await readResource(
+            `${baseUrl}?resource=contract_object_vehicle&id=${encodeURIComponent(objectId)}&page_size=10`,
+            `Falha ao consultar os dados do objeto Atlas ${objectId}.`
           );
-          const products = readRows(productPayload);
-          const hasTracker = products.some((product) => {
-            const id = String(product.product_id ?? '').trim();
-            return id === '13' || id === '0013';
-          });
-          if (!hasTracker) continue;
+          const rows = readRows(objectPayload);
+          const row = rows.find((item) => String(item.id ?? '') === objectId) ?? rows[0];
+          if (!row) continue;
 
-          const existingPerson = (row.person_data ?? {}) as Record<string, unknown>;
-          const existingVehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
-          const existingContract = (row.contract_data ?? {}) as Record<string, unknown>;
-          matched.push({
+          const person = (row.person_data ?? {}) as Record<string, unknown>;
+          const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
+          const contract = (row.contract_data ?? {}) as Record<string, unknown>;
+          objectDetails.push({
             ...row,
             person_data: {
-              ...existingPerson,
-              id: existingPerson.id ?? row.person_id,
-              name: existingPerson.name ?? row.person_name ?? row.name,
-              cpf_cnpj: existingPerson.cpf_cnpj ?? row.person_cpf_cnpj,
+              ...person,
+              id: person.id ?? row.person_id,
+              name: person.name ?? row.person_name,
+              cpf_cnpj: person.cpf_cnpj ?? row.person_cpf_cnpj,
             },
             vehicle_data: {
-              ...existingVehicle,
-              plate: existingVehicle.plate ?? row.vehicle_plate ?? row.plate,
-              assembler: existingVehicle.assembler ?? row.vehicle_assembler ?? row.assembler,
-              model: existingVehicle.model ?? row.vehicle_model ?? row.model,
+              ...vehicle,
+              plate: vehicle.plate ?? row.vehicle_plate,
+              assembler: vehicle.assembler ?? row.vehicle_assembler,
+              model: vehicle.model ?? row.vehicle_model,
+              chassi: vehicle.chassi ?? row.vehicle_chassi,
+              renavam: vehicle.renavam ?? row.vehicle_renavam,
             },
             contract_data: {
-              ...existingContract,
-              contract_id: existingContract.contract_id ?? row.contract_id,
-              contract_status: existingContract.contract_status ?? row.contract_status,
+              ...contract,
+              contract_id: contract.contract_id ?? row.contract_id,
+              contract_status: contract.contract_status ?? row.contract_status,
             },
             product_code: '0013',
           });
         }
       };
-      await Promise.all(Array.from({ length: Math.min(8, objects.length) }, () => worker()));
+      await Promise.all(Array.from({ length: Math.min(5, objectIds.length) }, () => worker()));
 
-      matched.sort((a, b) => String(a.vehicle_data && (a.vehicle_data as Record<string, unknown>).plate || '').localeCompare(
-        String(b.vehicle_data && (b.vehicle_data as Record<string, unknown>).plate || '')
-      ));
-      setAtlasContracts(matched);
+      objectDetails.sort((a, b) =>
+        String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')
+          .localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? ''))
+      );
+      setAtlasContracts(objectDetails);
       setAtlasPage(page);
-      setAtlasCount(matched.length);
-      setAtlasTotalPages(Math.max(1, Math.ceil(objectCount / ATLAS_PAGE_SIZE)));
+      setAtlasCount(totalCount || objectDetails.length);
+      setAtlasTotalPages(Math.max(1, Math.ceil((totalCount || productRows.length) / ATLAS_PAGE_SIZE)));
+      if (productRows.length > 0 && objectDetails.length === 0) {
+        setAtlasError('O produto 0013 foi localizado, mas a API não retornou os dados dos objetos. Confira os detalhes do endpoint contract_object_vehicle.');
+      }
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally {
