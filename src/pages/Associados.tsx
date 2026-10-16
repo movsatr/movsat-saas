@@ -35,6 +35,10 @@ export function Associados() {
   const [atlasContracts, setAtlasContracts] = useState<Record<string, unknown>[]>([]);
   const [atlasLoading, setAtlasLoading] = useState(false);
   const [atlasError, setAtlasError] = useState<string | null>(null);
+  const [atlasPage, setAtlasPage] = useState(1);
+  const [atlasCount, setAtlasCount] = useState(0);
+  const [atlasPeople, setAtlasPeople] = useState<Record<string, Record<string, unknown>>>({});
+  const ATLAS_PAGE_SIZE = 10;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -86,7 +90,7 @@ export function Associados() {
     }
   };
 
-  const loadAtlasContracts = async () => {
+  const loadAtlasContracts = async (page = atlasPage) => {
     if (role !== 'administrador') return;
     setAtlasLoading(true);
     setAtlasError(null);
@@ -95,21 +99,55 @@ export function Associados() {
       const token = sessionData.session?.access_token;
       if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente.');
 
+      const headers = {
+        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token}`,
+      };
+      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api?resource=contracts&page=1&page_size=10`,
-        {
-          headers: {
-            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-            Authorization: `Bearer ${token}`,
-          },
-        }
+        `${baseUrl}?resource=contracts&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
+        { headers }
       );
       const payload = await response.json();
       if (!response.ok || payload?.ok === false) {
         throw new Error(payload?.error || 'Falha ao consultar contratos Atlas.');
       }
+
       const result = payload?.data;
-      setAtlasContracts(Array.isArray(result?.results) ? result.results : []);
+      const contracts = Array.isArray(result?.results) ? result.results as Record<string, unknown>[] : [];
+      setAtlasContracts(contracts);
+      setAtlasPage(page);
+      setAtlasCount(Number(result?.count ?? 0));
+
+      // A API de contratos retorna person_id, não o nome. Busca cada pessoa única
+      // desta página e guarda os resultados pelo ID para exibir o nome real.
+      const personIds = [...new Set(contracts
+        .map((contract) => contract.person_id)
+        .filter((id): id is string | number => typeof id === 'string' || typeof id === 'number')
+        .map(String))];
+      const peopleEntries = await Promise.all(personIds.map(async (personId) => {
+        try {
+          const personResponse = await fetch(
+            `${baseUrl}?resource=person&id=${encodeURIComponent(personId)}`,
+            { headers }
+          );
+          const personPayload = await personResponse.json();
+          if (!personResponse.ok || personPayload?.ok === false) return [personId, {}] as const;
+          const personData = personPayload?.data;
+          const people = Array.isArray(personData?.results)
+            ? personData.results
+            : personData && typeof personData === 'object' && !Array.isArray(personData)
+              ? [personData]
+              : [];
+          const person = (people as Record<string, unknown>[]).find((item) => String(item.id) === personId)
+            ?? (people as Record<string, unknown>[])[0]
+            ?? {};
+          return [personId, person] as const;
+        } catch {
+          return [personId, {}] as const;
+        }
+      }));
+      setAtlasPeople((previous) => ({ ...previous, ...Object.fromEntries(peopleEntries) }));
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar contratos Atlas.');
     } finally {
@@ -118,7 +156,7 @@ export function Associados() {
   };
 
   useEffect(() => { loadData(); }, []);
-  useEffect(() => { if (role === 'administrador') loadAtlasContracts(); }, [role]);
+  useEffect(() => { if (role === 'administrador') loadAtlasContracts(1); }, [role]);
 
   const toggleRow = (id: string) => {
     setExpandedRows((prev) => {
@@ -219,7 +257,7 @@ export function Associados() {
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Contratos Atlas</h2>
-              <p className="text-sm text-slate-500">Contratos retornados pela API Atlas</p>
+              <p className="text-sm text-slate-500">Contratos retornados pela API Atlas, com nomes consultados pelo ID da pessoa</p>
             </div>
             <Button onClick={loadAtlasContracts} disabled={atlasLoading}>
               {atlasLoading ? 'Carregando...' : 'Atualizar'}
@@ -227,7 +265,7 @@ export function Associados() {
           </div>
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {!atlasLoading && !atlasError && (
-            <p className="mb-3 text-sm text-slate-500">{atlasContracts.length} contratos nesta página.</p>
+            <p className="mb-3 text-sm text-slate-500">Exibindo {atlasContracts.length} de {atlasCount.toLocaleString('pt-BR')} contratos • página {atlasPage} de {Math.max(1, Math.ceil(atlasCount / ATLAS_PAGE_SIZE))}.</p>
           )}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -243,7 +281,12 @@ export function Associados() {
                 {atlasContracts.map((contract, index) => (
                   <tr key={String(contract.id ?? index)} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="p-2">{String(contract.id ?? contract.contract_id ?? '—')}</td>
-                    <td className="p-2">{String((contract.person as Record<string, unknown> | undefined)?.name ?? (contract.person as Record<string, unknown> | undefined)?.full_name ?? contract.person_name ?? contract.person_full_name ?? contract.name ?? (contract.person_id != null ? `Pessoa #${contract.person_id}` : '—'))}</td>
+                    <td className="p-2">{(() => {
+                      const personId = contract.person_id == null ? '' : String(contract.person_id);
+                      const person = atlasPeople[personId] ?? contract.person as Record<string, unknown> | undefined;
+                      const personName = person?.name ?? person?.full_name ?? person?.social_name ?? person?.corporate_name ?? contract.person_name ?? contract.person_full_name ?? contract.name;
+                      return String(personName ?? (personId ? `Pessoa #${personId}` : '—'));
+                    })()}</td>
                     <td className="p-2">{String(contract.contract_status ?? contract.status ?? '—')}</td>
                     <td className="p-2">{String(contract.contract_date ?? contract.created_at ?? '—')}</td>
                   </tr>
@@ -253,6 +296,15 @@ export function Associados() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <Button variant="secondary" disabled={atlasLoading || atlasPage <= 1} onClick={() => loadAtlasContracts(atlasPage - 1)}>
+              Anterior
+            </Button>
+            <span className="text-xs text-slate-500">Página {atlasPage} / {Math.max(1, Math.ceil(atlasCount / ATLAS_PAGE_SIZE))}</span>
+            <Button variant="secondary" disabled={atlasLoading || atlasPage >= Math.ceil(atlasCount / ATLAS_PAGE_SIZE)} onClick={() => loadAtlasContracts(atlasPage + 1)}>
+              Próxima
+            </Button>
           </div>
         </section>
       )}
