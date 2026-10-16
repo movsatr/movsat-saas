@@ -99,24 +99,39 @@ export function Associados() {
       if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente.');
       const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
-      const response = await fetch(`${baseUrl}?resource=softruck_contract_objects&page=${page}&page_size=${ATLAS_PAGE_SIZE}`, { headers });
-      const payload = await response.json();
-      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || 'Falha ao consultar associados rastreados da Atlas.');
-      const result = payload?.data;
-      const pageData = result?.data ?? result;
-      const rows = Array.isArray(pageData?.results)
-        ? pageData.results as Record<string, unknown>[]
-        : Array.isArray(pageData?.items)
-          ? pageData.items as Record<string, unknown>[]
-          : Array.isArray(pageData)
-            ? pageData as Record<string, unknown>[]
-            : [];
-      if (!Array.isArray(pageData?.results) && !Array.isArray(pageData?.items) && !Array.isArray(pageData)) {
-        throw new Error('A API Atlas respondeu, mas o formato da lista de objetos Softruck não foi reconhecido.');
-      }
-      setAtlasContracts(rows);
+      const readRows = (payload: any): Record<string, unknown>[] => {
+        const root = payload?.data;
+        const body = root?.data ?? root;
+        const rows = body?.results ?? body?.items ?? body;
+        return Array.isArray(rows) ? rows : [];
+      };
+
+      // Primeiro busca os objetos reais dos contratos. O endpoint Softruck não retorna a frota comercial.
+      const objectResponse = await fetch(`${baseUrl}?resource=contract_object&page=${page}&page_size=${ATLAS_PAGE_SIZE}`, { headers });
+      const objectPayload = await objectResponse.json();
+      if (!objectResponse.ok || objectPayload?.ok === false) throw new Error(objectPayload?.error || 'Falha ao consultar objetos de contrato da Atlas.');
+      const objects = readRows(objectPayload);
+
+      // Só mantém objetos cujo produto vinculado seja o Rastreador (código comercial 0013).
+      const checked = await Promise.all(objects.map(async (object) => {
+        const objectId = object.id;
+        if (objectId == null) return null;
+        const productResponse = await fetch(`${baseUrl}?resource=contract_object_product&contract_object_id=${encodeURIComponent(String(objectId))}&page_size=100`, { headers });
+        const productPayload = await productResponse.json();
+        if (!productResponse.ok || productPayload?.ok === false) throw new Error(productPayload?.error || 'Falha ao consultar produtos dos contratos Atlas.');
+        const products = readRows(productPayload);
+        const hasTracker = products.some((product) => {
+          const id = String(product.product_id ?? '').trim();
+          const code = String(product.product_code ?? product.code ?? product.product?.code ?? '').trim();
+          return id === '13' || id === '0013' || code === '13' || code === '0013';
+        });
+        if (!hasTracker) return null;
+        return object;
+      }));
+      const trackerObjects = checked.filter((row): row is Record<string, unknown> => row !== null);
+      setAtlasContracts(trackerObjects);
       setAtlasPage(page);
-      setAtlasCount(Number(pageData?.count ?? pageData?.total ?? rows.length));
+      setAtlasCount(trackerObjects.length);
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally { setAtlasLoading(false); }
