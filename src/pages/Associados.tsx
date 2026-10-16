@@ -38,7 +38,7 @@ export function Associados() {
   const [atlasPage, setAtlasPage] = useState(1);
   const [atlasCount, setAtlasCount] = useState(0);
   const [atlasTotalPages, setAtlasTotalPages] = useState(1);
-  const ATLAS_PAGE_SIZE = 10;
+  const ATLAS_PAGE_SIZE = 50;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -122,93 +122,69 @@ export function Associados() {
         return payload;
       };
 
-      // A lista Softruck é exclusiva desse fornecedor e pode retornar zero.
-      // Partimos dos contratos, consultamos os produtos vinculados e só então buscamos os veículos.
-      const contractPayload = await readResource(
-        `${baseUrl}?resource=contracts&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
-        'Falha ao consultar contratos da Atlas.'
+      // A lista de contratos traz IDs antigos que não representam a frota atual.
+      // Usamos os objetos de veículo e consultamos diretamente o vínculo do produto 0013 por objeto.
+      const objectsPayload = await readResource(
+        `${baseUrl}?resource=contract_object_vehicle&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
+        'Falha ao consultar objetos/veículos dos contratos Atlas.'
       );
-      const contracts = readRows(contractPayload);
-      const contractCount = readCount(contractPayload);
+      const objects = readRows(objectsPayload);
+      const objectCount = readCount(objectsPayload);
+      let nextIndex = 0;
+      const matched: Record<string, unknown>[] = [];
+      const worker = async () => {
+        while (true) {
+          const currentIndex = nextIndex++;
+          if (currentIndex >= objects.length) return;
+          const row = objects[currentIndex];
+          if (row.id == null) continue;
 
-      const productsByContract = await Promise.all(contracts.map(async (contract) => {
-        const contractId = contract.id;
-        if (contractId == null) return { contract, products: [] as Record<string, unknown>[] };
-        const productPayload = await readResource(
-          `${baseUrl}?resource=contract_object_product&contract_id=${encodeURIComponent(String(contractId))}&page_size=100`,
-          'Falha ao consultar produtos dos contratos Atlas.'
-        );
-        const products = readRows(productPayload);
-        return { contract, products };
-      }));
-
-      const matchingObjects = productsByContract.flatMap(({ contract, products }) => {
-        const trackerProducts = products.filter((product) => {
-          const productId = String(product.product_id ?? '').trim();
-          const productCode = String(
-            product.product_code ?? product.code ?? product.product?.code ?? product.product_data?.code ?? ''
-          ).trim();
-          // Na resposta de vínculo da API só há product_id; o código 0013 corresponde ao ID 13.
-          return productId === '13' || productId === '0013' || productCode === '0013';
-        });
-        return trackerProducts
-          .filter((product) => product.contract_object_id != null)
-          .map((product) => ({
-            contractId: contract.id,
-            objectId: String(product.contract_object_id),
-            contract,
-          }));
-      });
-
-      const byContract = new Map<string, typeof matchingObjects>();
-      matchingObjects.forEach((item) => {
-        const key = String(item.contractId);
-        const existing = byContract.get(key) ?? [];
-        existing.push(item);
-        byContract.set(key, existing);
-      });
-
-      const vehicleRows = await Promise.all(Array.from(byContract.entries()).map(async ([contractId, items]) => {
-        const objectPayload = await readResource(
-          `${baseUrl}?resource=contract_object_vehicle&contract_id=${encodeURIComponent(contractId)}&page_size=100`,
-          'Falha ao consultar veículos vinculados aos contratos Atlas.'
-        );
-        const objects = readRows(objectPayload);
-        const wantedIds = new Set(items.map((item) => item.objectId));
-        return objects
-          .filter((row) => wantedIds.has(String(row.id ?? '')))
-          .map((row) => {
-            const person = (row.person_data ?? {}) as Record<string, unknown>;
-            const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
-            const contract = (row.contract_data ?? items[0]?.contract ?? {}) as Record<string, unknown>;
-            return {
-              ...row,
-              person_data: {
-                ...person,
-                name: person.name ?? row.person_name ?? row.name,
-                cpf_cnpj: person.cpf_cnpj ?? row.person_cpf_cnpj,
-              },
-              vehicle_data: {
-                ...vehicle,
-                plate: vehicle.plate ?? row.vehicle_plate,
-                assembler: vehicle.assembler ?? row.vehicle_assembler,
-                model: vehicle.model ?? row.vehicle_model,
-              },
-              contract_data: {
-                ...contract,
-                contract_id: contract.contract_id ?? row.contract_id,
-                contract_status: contract.contract_status ?? row.contract_status,
-              },
-              product_code: '0013',
-            } as Record<string, unknown>;
+          const productPayload = await readResource(
+            `${baseUrl}?resource=contract_object_product&contract_object_id=${encodeURIComponent(String(row.id))}&product_id=13&page_size=100`,
+            'Falha ao consultar o produto 0013 dos objetos Atlas.'
+          );
+          const products = readRows(productPayload);
+          const hasTracker = products.some((product) => {
+            const id = String(product.product_id ?? '').trim();
+            return id === '13' || id === '0013';
           });
-      }));
+          if (!hasTracker) continue;
 
-      const trackerObjects = vehicleRows.flat();
-      setAtlasContracts(trackerObjects);
+          const existingPerson = (row.person_data ?? {}) as Record<string, unknown>;
+          const existingVehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
+          const existingContract = (row.contract_data ?? {}) as Record<string, unknown>;
+          matched.push({
+            ...row,
+            person_data: {
+              ...existingPerson,
+              id: existingPerson.id ?? row.person_id,
+              name: existingPerson.name ?? row.person_name ?? row.name,
+              cpf_cnpj: existingPerson.cpf_cnpj ?? row.person_cpf_cnpj,
+            },
+            vehicle_data: {
+              ...existingVehicle,
+              plate: existingVehicle.plate ?? row.vehicle_plate ?? row.plate,
+              assembler: existingVehicle.assembler ?? row.vehicle_assembler ?? row.assembler,
+              model: existingVehicle.model ?? row.vehicle_model ?? row.model,
+            },
+            contract_data: {
+              ...existingContract,
+              contract_id: existingContract.contract_id ?? row.contract_id,
+              contract_status: existingContract.contract_status ?? row.contract_status,
+            },
+            product_code: '0013',
+          });
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(8, objects.length) }, () => worker()));
+
+      matched.sort((a, b) => String(a.vehicle_data && (a.vehicle_data as Record<string, unknown>).plate || '').localeCompare(
+        String(b.vehicle_data && (b.vehicle_data as Record<string, unknown>).plate || '')
+      ));
+      setAtlasContracts(matched);
       setAtlasPage(page);
-      setAtlasCount(trackerObjects.length);
-      setAtlasTotalPages(Math.max(1, Math.ceil(contractCount / ATLAS_PAGE_SIZE)));
+      setAtlasCount(matched.length);
+      setAtlasTotalPages(Math.max(1, Math.ceil(objectCount / ATLAS_PAGE_SIZE)));
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally {
@@ -326,15 +302,15 @@ export function Associados() {
           {!atlasError && (
             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Registros de rastreamento</p>
+                <p className="text-xs text-slate-500">Veículos com produto 0013 nesta página</p>
                 <p className="mt-1 text-xl font-semibold">{atlasCount.toLocaleString('pt-BR')}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Associados distintos nesta página</p>
+                <p className="text-xs text-slate-500">Associados distintos com produto 0013</p>
                 <p className="mt-1 text-xl font-semibold">{new Set(atlasContracts.map((row) => (row.person_data ?? {}) as Record<string, unknown>).map((person) => String(person.id ?? person.cpf_cnpj ?? person.name ?? '')).filter(Boolean)).size}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Veículos com placa nesta página</p>
+                <p className="text-xs text-slate-500">Veículos com placa</p>
                 <p className="mt-1 text-xl font-semibold">{atlasContracts.filter((row) => Boolean(((row.vehicle_data ?? {}) as Record<string, unknown>).plate)).length}</p>
               </div>
             </div>
@@ -358,7 +334,7 @@ export function Associados() {
                     <td className="px-3 py-3">{String(contract.contract_status ?? '—')}</td>
                   </tr>;
                 })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>A API não retornou objetos rastreados para esta consulta.</td></tr>}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>Nenhum objeto desta página possui o produto 0013. Use Próxima para consultar a página seguinte.</td></tr>}
               </tbody>
             </table>
           </div>
