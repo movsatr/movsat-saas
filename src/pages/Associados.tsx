@@ -38,7 +38,7 @@ export function Associados() {
   const [atlasPage, setAtlasPage] = useState(1);
   const [atlasCount, setAtlasCount] = useState(0);
   const [atlasTotalPages, setAtlasTotalPages] = useState(1);
-  const ATLAS_PAGE_SIZE = 50;
+  const ATLAS_PAGE_SIZE = 10;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -126,7 +126,7 @@ export function Associados() {
       let totalObjectPages = atlasTotalPages;
       let found: Record<string, unknown>[] = [];
       let lastScannedPage = scanPage;
-      const MAX_PAGES_PER_REFRESH = 3;
+      const MAX_PAGES_PER_REFRESH = 1;
 
       // Busca objetos com dados de veículo/associado e avança sozinha por páginas sem produto 0013.
       // Não limita por fornecedor. O produto é validado pelo vínculo contract_object_id.
@@ -199,7 +199,7 @@ export function Associados() {
             }
           }
         };
-        await Promise.all(Array.from({ length: Math.min(6, entries.length) }, () => worker()));
+        await Promise.all(Array.from({ length: Math.min(12, entries.length) }, () => worker()));
         if (pageMatches.length > 0) {
           found = pageMatches;
           break;
@@ -366,7 +366,7 @@ export function Associados() {
                     <td className="px-3 py-3">{String(contract.contract_status ?? '—')}</td>
                   </tr>;
                 })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>A busca avança automaticamente por até 3 páginas de objetos por atualização.</td></tr>}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>A consulta verifica uma página por vez para evitar timeout da API Atlas.</td></tr>}
               </tbody>
             </table>
           </div>
