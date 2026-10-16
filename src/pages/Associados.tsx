@@ -256,58 +256,40 @@ export function Associados() {
 
       {role === 'administrador' && (
         <section className="mb-6 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">Contratos Atlas</h2>
-              <p className="text-sm text-slate-500">Atlas: contratos e pessoas • MovSat: clientes com rastreadores vinculados</p>
-            </div>
-            <Button onClick={loadAtlasContracts} disabled={atlasLoading}>
-              {atlasLoading ? 'Carregando...' : 'Atualizar'}
-            </Button>
+          <div className="mb-3">
+            <h2 className="text-lg font-semibold">Associados MovSat com rastreador</h2>
+            <p className="text-sm text-slate-500">Lista filtrada pelos vínculos reais de rastreadores no banco MovSat. Os nomes vêm do cadastro local, não do retorno genérico de contratos Atlas.</p>
           </div>
-          {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
-          {!atlasLoading && !atlasError && (
-            <p className="mb-3 text-sm text-slate-500">Exibindo {atlasContracts.length} de {atlasCount.toLocaleString('pt-BR')} contratos • página {atlasPage} de {Math.max(1, Math.ceil(atlasCount / ATLAS_PAGE_SIZE))}.</p>
-            <p className="mb-3 text-sm font-medium text-slate-700 dark:text-slate-300">MovSat: {associadosComRastreador.length} associados com rastreador • {totalRastreadoresVinculados} rastreadores vinculados</p>
-          )}
+          <div className="mb-3 flex flex-wrap gap-4 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <span>{associadosComRastreador.length} associados com rastreador</span>
+            <span>{totalRastreadoresVinculados} rastreadores vinculados</span>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700">
-                  <th className="p-2">Contrato</th>
-                  <th className="p-2">Pessoa</th>
-                  <th className="p-2">Status</th>
-                  <th className="p-2">Data</th>
+                  <th className="p-2">Nome exato no MovSat</th>
+                  <th className="p-2">CPF/CNPJ</th>
+                  <th className="p-2">Telefone</th>
+                  <th className="p-2">Rastreadores</th>
+                  <th className="p-2">IMEs</th>
                 </tr>
               </thead>
               <tbody>
-                {atlasContracts.map((contract, index) => (
-                  <tr key={String(contract.id ?? index)} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="p-2">{String(contract.id ?? contract.contract_id ?? '—')}</td>
-                    <td className="p-2">{(() => {
-                      const personId = contract.person_id == null ? '' : String(contract.person_id);
-                      const person = atlasPeople[personId] ?? contract.person as Record<string, unknown> | undefined;
-                      const personName = person?.name ?? person?.full_name ?? person?.person_name ?? person?.nome ?? person?.legal_name ?? person?.corporate_name ?? person?.social_name ?? person?.razao_social ?? person?.nome_completo ?? contract.person_name ?? contract.person_full_name ?? contract.name;
-                      return String(personName ?? (personId ? `Pessoa #${personId}` : '—'));
-                    })()}</td>
-                    <td className="p-2">{String(contract.contract_status ?? contract.status ?? '—')}</td>
-                    <td className="p-2">{String(contract.contract_date ?? contract.created_at ?? '—')}</td>
+                {associadosComRastreador.map((associado) => (
+                  <tr key={associado.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="p-2 font-medium">{associado.nome}</td>
+                    <td className="p-2">{associado.cpf_cnpj || '—'}</td>
+                    <td className="p-2">{associado.telefone || '—'}</td>
+                    <td className="p-2">{associado.rastreadores.length}</td>
+                    <td className="p-2 font-mono text-xs">{associado.rastreadores.map((rastreador) => rastreador.imei).join(', ') || '—'}</td>
                   </tr>
                 ))}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && (
-                  <tr><td className="p-3 text-slate-500" colSpan={4}>Nenhum contrato retornado.</td></tr>
+                {associadosComRastreador.length === 0 && (
+                  <tr><td className="p-3 text-slate-500" colSpan={5}>Nenhum associado possui rastreador vinculado no MovSat.</td></tr>
                 )}
               </tbody>
             </table>
-          </div>
-          <div className="mt-3 flex items-center justify-between gap-3">
-            <Button variant="secondary" disabled={atlasLoading || atlasPage <= 1} onClick={() => loadAtlasContracts(atlasPage - 1)}>
-              Anterior
-            </Button>
-            <span className="text-xs text-slate-500">Página {atlasPage} / {Math.max(1, Math.ceil(atlasCount / ATLAS_PAGE_SIZE))}</span>
-            <Button variant="secondary" disabled={atlasLoading || atlasPage >= Math.ceil(atlasCount / ATLAS_PAGE_SIZE)} onClick={() => loadAtlasContracts(atlasPage + 1)}>
-              Próxima
-            </Button>
           </div>
         </section>
       )}
