@@ -37,10 +37,7 @@ export function Associados() {
   const [atlasError, setAtlasError] = useState<string | null>(null);
   const [atlasPage, setAtlasPage] = useState(1);
   const [atlasCount, setAtlasCount] = useState(0);
-  const [atlasPeople, setAtlasPeople] = useState<Record<string, Record<string, unknown>>>({});
   const ATLAS_PAGE_SIZE = 10;
-  const associadosComRastreador = data.filter((associado) => associado.rastreadores.length > 0);
-  const totalRastreadoresVinculados = data.reduce((total, associado) => total + associado.rastreadores.length, 0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -106,11 +103,20 @@ export function Associados() {
       const payload = await response.json();
       if (!response.ok || payload?.ok === false) throw new Error(payload?.error || 'Falha ao consultar associados rastreados da Atlas.');
       const result = payload?.data;
-      const rows = Array.isArray(result?.results) ? result.results as Record<string, unknown>[] : Array.isArray(result) ? result as Record<string, unknown>[] : [];
+      const pageData = result?.data ?? result;
+      const rows = Array.isArray(pageData?.results)
+        ? pageData.results as Record<string, unknown>[]
+        : Array.isArray(pageData?.items)
+          ? pageData.items as Record<string, unknown>[]
+          : Array.isArray(pageData)
+            ? pageData as Record<string, unknown>[]
+            : [];
+      if (!Array.isArray(pageData?.results) && !Array.isArray(pageData?.items) && !Array.isArray(pageData)) {
+        throw new Error('A API Atlas respondeu, mas o formato da lista de objetos Softruck não foi reconhecido.');
+      }
       setAtlasContracts(rows);
       setAtlasPage(page);
-      setAtlasCount(Number(result?.count ?? rows.length));
-      setAtlasPeople({});
+      setAtlasCount(Number(pageData?.count ?? pageData?.total ?? rows.length));
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally { setAtlasLoading(false); }
@@ -230,11 +236,11 @@ export function Associados() {
                 <p className="mt-1 text-xl font-semibold">{atlasCount.toLocaleString('pt-BR')}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Associados nesta página</p>
-                <p className="mt-1 text-xl font-semibold">{new Set(atlasContracts.map((row) => String(((row.person_data ?? {}) as Record<string, unknown>).id ?? ''))).size}</p>
+                <p className="text-xs text-slate-500">Associados distintos nesta página</p>
+                <p className="mt-1 text-xl font-semibold">{new Set(atlasContracts.map((row) => (row.person_data ?? {}) as Record<string, unknown>).map((person) => String(person.id ?? person.cpf_cnpj ?? person.name ?? '')).filter(Boolean)).size}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Veículos identificados</p>
+                <p className="text-xs text-slate-500">Veículos com placa nesta página</p>
                 <p className="mt-1 text-xl font-semibold">{atlasContracts.filter((row) => Boolean(((row.vehicle_data ?? {}) as Record<string, unknown>).plate)).length}</p>
               </div>
             </div>
