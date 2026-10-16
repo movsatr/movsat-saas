@@ -106,8 +106,8 @@ export function Associados() {
         return Array.isArray(rows) ? rows : [];
       };
 
-      // Primeiro busca os objetos reais dos contratos. O endpoint Softruck não retorna a frota comercial.
-      const objectResponse = await fetch(`${baseUrl}?resource=contract_object&page=${page}&page_size=${ATLAS_PAGE_SIZE}`, { headers });
+      // Usa o endpoint Softruck, que responde normalmente, para obter os objetos e então confere o produto vinculado.
+      const objectResponse = await fetch(`${baseUrl}?resource=softruck_contract_objects&page=${page}&page_size=${ATLAS_PAGE_SIZE}`, { headers });
       const objectPayload = await objectResponse.json();
       if (!objectResponse.ok || objectPayload?.ok === false) throw new Error(objectPayload?.error || 'Falha ao consultar objetos de contrato da Atlas.');
       const objects = readRows(objectPayload);
@@ -239,7 +239,7 @@ export function Associados() {
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-slate-900 dark:text-white">Frota rastreada — Atlas</h2>
-              <p className="mt-1 text-sm text-slate-500">Associados e veículos retornados pelo endpoint exclusivo da Softruck na API Atlas.</p>
+              <p className="mt-1 text-sm text-slate-500">Objetos retornados pela Atlas/Softruck, filtrados pelo produto Rastreador (0013).</p>
             </div>
             <Button onClick={() => loadAtlasContracts(1)} disabled={atlasLoading}>{atlasLoading ? 'Atualizando…' : 'Atualizar'}</Button>
           </div>
