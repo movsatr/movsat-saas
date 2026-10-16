@@ -101,53 +101,74 @@ export function Associados() {
       const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
       const currentPage = Math.max(1, page);
-      const productResponse = await fetch(
-        `${baseUrl}?resource=contract_object_product&product_id=13&page=${currentPage}&page_size=${ATLAS_PAGE_SIZE}`,
+      const response = await fetch(
+        `${baseUrl}?resource=contract_object_nested&page=${currentPage}&page_size=${ATLAS_PAGE_SIZE}`,
         { headers, signal: AbortSignal.timeout(35000) }
       );
-      const productPayload = await productResponse.json();
-      if (!productResponse.ok || productPayload?.ok === false) throw new Error(productPayload?.error || 'Falha ao consultar produtos de rastreamento da Atlas.');
-      const root = productPayload?.data;
-      const body = root?.data ?? root;
-      const productRows = (Array.isArray(body) ? body : body?.results ?? body?.items ?? body?.data ?? [])
-        .filter((row: Record<string, unknown>) => row.deleted !== true && row.activated !== false) as Record<string, unknown>[];
-      const total = Number(body?.count ?? body?.total ?? productRows.length);
-      const totalPages = Math.max(1, Math.ceil((Number.isFinite(total) ? total : productRows.length) / ATLAS_PAGE_SIZE));
+      const payload = await response.json();
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || 'Falha ao consultar objetos de contrato da Atlas.');
 
-      const details: Record<string, unknown>[] = [];
-      const uniqueIds = [...new Set(productRows.map((row) => String(row.contract_object_id ?? row.object_id ?? '')).filter(Boolean))];
-      for (let offset = 0; offset < uniqueIds.length; offset += 5) {
-        const batch = uniqueIds.slice(offset, offset + 5);
-        const results = await Promise.all(batch.map(async (id) => {
-          const response = await fetch(
-            `${baseUrl}?resource=contract_object_nested&id=${encodeURIComponent(id)}`,
-            { headers, signal: AbortSignal.timeout(35000) }
+      const root = payload?.data;
+      const body = root?.data ?? root;
+      const objectRows = (Array.isArray(body) ? body : body?.results ?? body?.items ?? body?.data ?? []) as Record<string, unknown>[];
+      const total = Number(body?.count ?? body?.total ?? objectRows.length);
+      const totalPages = Math.max(1, Math.ceil((Number.isFinite(total) ? total : objectRows.length) / ATLAS_PAGE_SIZE));
+      const candidates = objectRows.filter((row) =>
+        row.deleted !== true && (!row.object_type || String(row.object_type).toUpperCase() === 'VEHICLE') && (row.id != null)
+      );
+
+      const matched: Record<string, unknown>[] = [];
+      const errors: string[] = [];
+      for (let offset = 0; offset < candidates.length; offset += 5) {
+        const batch = candidates.slice(offset, offset + 5);
+        const results = await Promise.all(batch.map(async (object) => {
+          const id = String(object.id);
+          const query = new URLSearchParams({ resource: 'contract_object_product', contract_object_id: id, page: '1', page_size: '100' });
+          const productResponse = await fetch(`${baseUrl}?${query.toString()}`, {
+            headers,
+            signal: AbortSignal.timeout(35000),
+          });
+          const productPayload = await productResponse.json();
+          if (!productResponse.ok || productPayload?.ok === false) {
+            errors.push(`objeto ${id}: ${productPayload?.error ?? 'erro na consulta de produto'}`);
+            return null;
+          }
+          const productRoot = productPayload?.data;
+          const productBody = productRoot?.data ?? productRoot;
+          const products = (Array.isArray(productBody) ? productBody : productBody?.results ?? productBody?.items ?? productBody?.data ?? []) as Record<string, unknown>[];
+          const hasTracker = products.some((product) =>
+            String(product.product_id ?? product.product_code ?? '') === '13' &&
+            product.deleted !== true && product.activated !== false
           );
-          const payload = await response.json();
-          if (!response.ok || payload?.ok === false) throw new Error(payload?.error || `Falha ao consultar objeto Atlas ${id}.`);
-          const apiData = payload?.data?.data ?? payload?.data;
-          const rows = Array.isArray(apiData) ? apiData : apiData?.results ?? apiData?.items ?? apiData?.data ?? [];
-          return Array.isArray(rows) ? rows as Record<string, unknown>[] : [];
+          return hasTracker ? object : null;
         }));
-        for (const rows of results) details.push(...rows);
+        for (const result of results) if (result) matched.push(result);
       }
 
-      const found = details
-        .filter((row) => row.deleted !== true && (!row.object_type || row.object_type === 'VEHICLE'))
-        .map((row) => ({
-          ...row,
-          person_data: row.person_data ?? {},
-          vehicle_data: row.vehicle_data ?? {},
-          contract_data: { contract_id: row.contract_id ?? '—', contract_status: row.contract_status ?? '—' },
-          product_code: '0013',
-        }))
-        .sort((a, b) => String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '').localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')));
+      const found = matched.map((row) => ({
+        ...row,
+        person_data: row.person_data ?? {},
+        vehicle_data: row.vehicle_data ?? {},
+        contract_data: {
+          ...((row.contract_data ?? {}) as Record<string, unknown>),
+          contract_id: ((row.contract_data ?? {}) as Record<string, unknown>).contract_id ?? row.contract_id ?? '—',
+          contract_status: ((row.contract_data ?? {}) as Record<string, unknown>).contract_status ?? row.contract_status ?? '—',
+        },
+        product_code: '0013',
+      })).sort((a, b) =>
+        String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '').localeCompare(
+          String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')
+        )
+      );
 
       setAtlasContracts(found);
       setAtlasPage(currentPage);
       setAtlasCount(found.length);
       setAtlasTotalPages(totalPages);
-      if (found.length === 0) setAtlasError(`A Atlas retornou ${productRows.length} registros do produto 0013 na página ${currentPage}, mas não foi possível obter os detalhes dos objetos. Verifique o retorno da API e tente novamente.`);
+      if (found.length === 0) {
+        const errorDetail = errors.length ? ` Falhas ao verificar produtos: ${errors.slice(0, 3).join('; ')}` : '';
+        setAtlasError(`A Atlas retornou ${objectRows.length} objetos na página ${currentPage}, mas nenhum foi confirmado como produto de rastreamento 0013.${errorDetail}`);
+      }
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally {
