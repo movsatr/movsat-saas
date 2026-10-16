@@ -161,11 +161,9 @@ export function Associados() {
               `${baseUrl}?resource=contract_object_product&contract_id=${encodeURIComponent(contractId)}&product_id=13&page_size=100`,
               `Falha ao consultar produto Rastreador do contrato ${contractId}.`
             );
-            const productRows = readRows(productPayload).filter((product) => {
-              const productId = String(product.product_id ?? '').trim();
-              const productCode = String(product.product_code ?? product.code ?? '').trim();
-              return (productId === '13' || productId === '0013' || productCode === '0013') && product.deleted !== true;
-            });
+            // A API já filtra product_id=13 na consulta. Não refiltrar pela resposta:
+            // algumas respostas trazem apenas o vínculo contract_object_id, sem repetir product_id.
+            const productRows = readRows(productPayload).filter((product) => product.deleted !== true);
             const matchedIds = new Set(productRows
               .map((product) => product.contract_object_id)
               .filter((id) => id != null)
