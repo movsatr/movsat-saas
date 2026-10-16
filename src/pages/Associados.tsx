@@ -122,80 +122,101 @@ export function Associados() {
         return payload;
       };
 
-      // Busca diretamente os vínculos do produto Rastreador (ID 13 / código comercial 0013).
-      // Assim não dependemos de uma listagem geral de contratos/veículos que está expirando.
-      const productPayload = await readResource(
-        `${baseUrl}?resource=contract_object_product&product_id=13&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
-        'Falha ao consultar vínculos do produto Rastreador (0013) na Atlas.'
+      // Lista contratos e consulta o produto 0013 sempre dentro de um contrato/objeto válido.
+      const contractPayload = await readResource(
+        `${baseUrl}?resource=contracts&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
+        'Falha ao consultar contratos da Atlas.'
       );
-      const productRows = readRows(productPayload).filter((product) => {
-        const productId = String(product.product_id ?? '').trim();
-        return (productId === '13' || productId === '0013') && product.deleted !== true;
-      });
-      const totalCount = readCount(productPayload);
+      const contracts = readRows(contractPayload);
+      const contractCount = readCount(contractPayload);
 
-      const objectIds = Array.from(new Set(
-        productRows
-          .map((product) => product.contract_object_id)
-          .filter((id) => id != null)
-          .map((id) => String(id))
-      ));
-
-      const objectDetails: Record<string, unknown>[] = [];
-      let nextIndex = 0;
-      const worker = async () => {
+      let contractIndex = 0;
+      const matchedPairs: Array<{ product: Record<string, unknown>; contract: Record<string, unknown> }> = [];
+      const contractWorker = async () => {
         while (true) {
-          const currentIndex = nextIndex++;
-          if (currentIndex >= objectIds.length) return;
-          const objectId = objectIds[currentIndex];
-          const objectPayload = await readResource(
-            `${baseUrl}?resource=contract_object_vehicle&id=${encodeURIComponent(objectId)}&page_size=10`,
-            `Falha ao consultar os dados do objeto Atlas ${objectId}.`
+          const index = contractIndex++;
+          if (index >= contracts.length) return;
+          const contract = contracts[index];
+          if (contract.id == null) continue;
+          const payload = await readResource(
+            `${baseUrl}?resource=contract_object_product&contract_id=${encodeURIComponent(String(contract.id))}&product_id=13&page_size=100`,
+            `Falha ao consultar os produtos do contrato ${String(contract.id)}.`
           );
-          const rows = readRows(objectPayload);
-          const row = rows.find((item) => String(item.id ?? '') === objectId) ?? rows[0];
+          for (const product of readRows(payload)) {
+            const productId = String(product.product_id ?? '').trim();
+            const productCode = String(product.product_code ?? product.code ?? product.product?.code ?? '').trim();
+            if (productId !== '13' && productId !== '0013' && productCode !== '0013') continue;
+            matchedPairs.push({ product, contract });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(5, contracts.length) }, () => contractWorker()));
+
+      let objectIndex = 0;
+      const objectRows: Record<string, unknown>[] = [];
+      const objectWorker = async () => {
+        while (true) {
+          const index = objectIndex++;
+          if (index >= matchedPairs.length) return;
+          const { product, contract } = matchedPairs[index];
+          const objectId = product.contract_object_id ?? product.object_id;
+          if (objectId == null) continue;
+          const id = String(objectId);
+
+          let objectPayload = await readResource(
+            `${baseUrl}?resource=contract_object_vehicle&id=${encodeURIComponent(id)}&page_size=10`,
+            `Falha ao consultar o objeto ${id} da Atlas.`
+          );
+          let rows = readRows(objectPayload);
+          if (rows.length === 0) {
+            objectPayload = await readResource(
+              `${baseUrl}?resource=contract_object_nested&id=${encodeURIComponent(id)}&page_size=10`,
+              `Falha ao consultar os detalhes do objeto ${id} da Atlas.`
+            );
+            rows = readRows(objectPayload);
+          }
+          const row = rows.find((item) => String(item.id ?? '') === id) ?? rows[0];
           if (!row) continue;
 
-          const person = (row.person_data ?? {}) as Record<string, unknown>;
-          const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
-          const contract = (row.contract_data ?? {}) as Record<string, unknown>;
-          objectDetails.push({
+          const person = (row.person_data ?? row.person ?? {}) as Record<string, unknown>;
+          const vehicle = (row.vehicle_data ?? row.vehicle ?? {}) as Record<string, unknown>;
+          const rowContract = (row.contract_data ?? row.contract ?? contract) as Record<string, unknown>;
+          objectRows.push({
             ...row,
             person_data: {
               ...person,
               id: person.id ?? row.person_id,
-              name: person.name ?? row.person_name,
-              cpf_cnpj: person.cpf_cnpj ?? row.person_cpf_cnpj,
+              name: person.name ?? person.person_name ?? row.person_name ?? row.name,
+              cpf_cnpj: person.cpf_cnpj ?? person.person_cpf_cnpj ?? row.person_cpf_cnpj,
             },
             vehicle_data: {
               ...vehicle,
-              plate: vehicle.plate ?? row.vehicle_plate,
-              assembler: vehicle.assembler ?? row.vehicle_assembler,
-              model: vehicle.model ?? row.vehicle_model,
-              chassi: vehicle.chassi ?? row.vehicle_chassi,
-              renavam: vehicle.renavam ?? row.vehicle_renavam,
+              plate: vehicle.plate ?? vehicle.vehicle_plate ?? row.vehicle_plate ?? row.plate,
+              assembler: vehicle.assembler ?? vehicle.make ?? row.vehicle_assembler ?? row.assembler,
+              model: vehicle.model ?? row.vehicle_model ?? row.model,
             },
             contract_data: {
-              ...contract,
-              contract_id: contract.contract_id ?? row.contract_id,
-              contract_status: contract.contract_status ?? row.contract_status,
+              ...rowContract,
+              contract_id: rowContract.contract_id ?? row.contract_id ?? contract.id,
+              contract_status: rowContract.contract_status ?? row.contract_status ?? contract.contract_status,
             },
             product_code: '0013',
           });
         }
       };
-      await Promise.all(Array.from({ length: Math.min(5, objectIds.length) }, () => worker()));
+      await Promise.all(Array.from({ length: Math.min(5, matchedPairs.length) }, () => objectWorker()));
 
-      objectDetails.sort((a, b) =>
+      const uniqueRows = Array.from(new Map(objectRows.map((row) => [String(row.id ?? ((row.vehicle_data ?? {}) as Record<string, unknown>).plate ?? Math.random()), row])).values());
+      uniqueRows.sort((a, b) =>
         String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')
           .localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? ''))
       );
-      setAtlasContracts(objectDetails);
+      setAtlasContracts(uniqueRows);
       setAtlasPage(page);
-      setAtlasCount(totalCount || objectDetails.length);
-      setAtlasTotalPages(Math.max(1, Math.ceil((totalCount || productRows.length) / ATLAS_PAGE_SIZE)));
-      if (productRows.length > 0 && objectDetails.length === 0) {
-        setAtlasError('O produto 0013 foi localizado, mas a API não retornou os dados dos objetos. Confira os detalhes do endpoint contract_object_vehicle.');
+      setAtlasCount(uniqueRows.length);
+      setAtlasTotalPages(Math.max(1, Math.ceil(contractCount / ATLAS_PAGE_SIZE)));
+      if (matchedPairs.length > 0 && uniqueRows.length === 0) {
+        setAtlasError('A Atlas retornou o produto 0013, mas não foi possível carregar os dados dos objetos vinculados.');
       }
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
