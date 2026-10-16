@@ -95,126 +95,50 @@ export function Associados() {
     setAtlasLoading(true);
     setAtlasError(null);
     try {
+      const supplierId = String(import.meta.env.VITE_ATLAS_SUPPLIER_ID ?? '').trim();
+      if (!supplierId) throw new Error('A rota integrada da documentação exige supplier_id. Configure VITE_ATLAS_SUPPLIER_ID com o ID do fornecedor da Atlas; produto 0013 não é o ID do fornecedor.');
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente.');
       const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
 
-      const readRows = (payload: any): Record<string, unknown>[] => {
-        const root = payload?.data;
-        const body = root?.data ?? root;
-        const rows = body?.results ?? body?.items ?? body;
-        return Array.isArray(rows) ? rows : [];
-      };
-      const readCount = (payload: any): number => {
-        const root = payload?.data;
-        const body = root?.data ?? root;
-        const count = Number(body?.count ?? body?.total ?? 0);
-        return Number.isFinite(count) ? count : 0;
-      };
-      const readResource = async (url: string, fallbackMessage: string) => {
-        const response = await fetch(url, { headers });
-        const payload = await response.json();
-        if (!response.ok || payload?.ok === false) {
-          throw new Error(payload?.error || fallbackMessage);
-        }
-        return payload;
-      };
-
-      let scanPage = Math.max(1, page);
-      let totalObjectPages = atlasTotalPages;
-      let found: Record<string, unknown>[] = [];
-      let lastScannedPage = scanPage;
-      const MAX_PAGES_PER_REFRESH = 1;
-
-      // Busca objetos com dados de veículo/associado e avança sozinha por páginas sem produto 0013.
-      // Não limita por fornecedor. O produto é validado pelo vínculo contract_object_id.
-      for (let scanned = 0; scanned < MAX_PAGES_PER_REFRESH && scanPage <= totalObjectPages; scanned++, scanPage++) {
-        const objectsPayload = await readResource(
-          `${baseUrl}?resource=contract_object_vehicle&page=${scanPage}&page_size=${ATLAS_PAGE_SIZE}`,
-          'Falha ao consultar a lista de objetos da Atlas.'
-        );
-        const objects = readRows(objectsPayload);
-        const objectCount = readCount(objectsPayload);
-        totalObjectPages = Math.max(1, Math.ceil(objectCount / ATLAS_PAGE_SIZE));
-        lastScannedPage = scanPage;
-
-        const byContract = new Map<string, Record<string, unknown>[]>();
-        for (const object of objects) {
-          if (object.id == null || object.contract_id == null) continue;
-          const key = String(object.contract_id);
-          const existing = byContract.get(key) ?? [];
-          existing.push(object);
-          byContract.set(key, existing);
-        }
-
-        const entries = Array.from(byContract.entries());
-        let groupIndex = 0;
-        const pageMatches: Record<string, unknown>[] = [];
-        const worker = async () => {
-          while (true) {
-            const index = groupIndex++;
-            if (index >= entries.length) return;
-            const [contractId, contractObjects] = entries[index];
-            const productPayload = await readResource(
-              `${baseUrl}?resource=contract_object_product&contract_id=${encodeURIComponent(contractId)}&product_id=13&page_size=100`,
-              `Falha ao consultar produto Rastreador do contrato ${contractId}.`
-            );
-            // A API já filtra product_id=13 na consulta. Não refiltrar pela resposta:
-            // algumas respostas trazem apenas o vínculo contract_object_id, sem repetir product_id.
-            const productRows = readRows(productPayload).filter((product) => product.deleted !== true);
-            const matchedIds = new Set(productRows
-              .map((product) => product.contract_object_id)
-              .filter((id) => id != null)
-              .map((id) => String(id)));
-            for (const object of contractObjects) {
-              if (!matchedIds.has(String(object.id))) continue;
-              const person = (object.person_data ?? {}) as Record<string, unknown>;
-              const vehicle = (object.vehicle_data ?? {}) as Record<string, unknown>;
-              pageMatches.push({
-                ...object,
-                person_data: {
-                  ...person,
-                  id: person.id ?? object.person_id,
-                  name: person.name ?? object.person_name ?? object.name,
-                  cpf_cnpj: person.cpf_cnpj ?? object.person_cpf_cnpj,
-                },
-                vehicle_data: {
-                  ...vehicle,
-                  plate: vehicle.plate ?? object.vehicle_plate ?? object.plate,
-                  assembler: vehicle.assembler ?? object.vehicle_assembler ?? object.assembler,
-                  model: vehicle.model ?? object.vehicle_model ?? object.model,
-                  chassi: vehicle.chassi ?? object.vehicle_chassi,
-                  renavam: vehicle.renavam ?? object.vehicle_renavam,
-                },
-                contract_data: {
-                  contract_id: object.contract_id,
-                  contract_status: object.contract_status,
-                },
-                product_code: '0013',
-              });
-            }
-          }
-        };
-        await Promise.all(Array.from({ length: Math.min(12, entries.length) }, () => worker()));
-        if (pageMatches.length > 0) {
-          found = pageMatches;
-          break;
-        }
-      }
-
-      found.sort((a, b) =>
-        String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')
-          .localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? ''))
+      const response = await fetch(
+        `${baseUrl}?resource=integrations_contract_objects&supplier_id=${encodeURIComponent(supplierId)}&object_type=VEHICLE&page=${Math.max(1, page)}&page_size=${ATLAS_PAGE_SIZE}`,
+        { headers, signal: AbortSignal.timeout(35000) }
       );
+      const payload = await response.json();
+      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || 'Falha ao consultar objetos integrados da Atlas.');
+
+      const root = payload?.data;
+      const body = root?.data ?? root;
+      const rows = Array.isArray(body) ? body : body?.results ?? body?.items ?? body?.data ?? [];
+      const safeRows = Array.isArray(rows) ? rows as Record<string, unknown>[] : [];
+      const count = Number(body?.count ?? body?.total ?? safeRows.length);
+      const totalPages = Math.max(1, Math.ceil((Number.isFinite(count) ? count : safeRows.length) / ATLAS_PAGE_SIZE));
+      const found = safeRows
+        .filter((row) => row.deleted !== true && (!row.object_type || row.object_type === 'VEHICLE'))
+        .filter((row) => {
+          const products = Array.isArray(row.products_data) ? row.products_data as Record<string, unknown>[] : [];
+          return products.some((product) => String(product.product_id ?? '').padStart(4, '0') === '0013');
+        })
+        .map((row) => {
+          const contract = (row.contract_data ?? {}) as Record<string, unknown>;
+          return {
+            ...row,
+            person_data: row.person_data ?? {},
+            vehicle_data: row.vehicle_data ?? {},
+            contract_data: { ...contract, contract_id: contract.id ?? '—', contract_status: contract.status ?? '—' },
+            product_code: '0013',
+          };
+        })
+        .sort((a, b) => String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '').localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')));
+
       setAtlasContracts(found);
-      setAtlasPage(lastScannedPage);
+      setAtlasPage(Math.max(1, page));
       setAtlasCount(found.length);
-      setAtlasTotalPages(totalObjectPages);
-      if (found.length === 0) {
-        setAtlasError(`Não encontrei veículos com produto 0013 nas páginas ${Math.max(1, lastScannedPage - MAX_PAGES_PER_REFRESH + 1)}–${lastScannedPage}. Clique em Atualizar para continuar a busca.`);
-      }
+      setAtlasTotalPages(totalPages);
+      if (found.length === 0) setAtlasError(`A rota integrada respondeu, mas não retornou veículos com produto 0013 na página ${Math.max(1, page)}. Confira o fornecedor configurado e avance a página.`);
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally {
