@@ -39,6 +39,8 @@ export function Associados() {
   const [atlasCount, setAtlasCount] = useState(0);
   const [atlasPeople, setAtlasPeople] = useState<Record<string, Record<string, unknown>>>({});
   const ATLAS_PAGE_SIZE = 10;
+  const associadosComRastreador = data.filter((associado) => associado.rastreadores.length > 0);
+  const totalRastreadoresVinculados = data.reduce((total, associado) => total + associado.rastreadores.length, 0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -257,7 +259,7 @@ export function Associados() {
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Contratos Atlas</h2>
-              <p className="text-sm text-slate-500">Contratos retornados pela API Atlas, com nomes consultados pelo ID da pessoa</p>
+              <p className="text-sm text-slate-500">Atlas: contratos e pessoas • MovSat: clientes com rastreadores vinculados</p>
             </div>
             <Button onClick={loadAtlasContracts} disabled={atlasLoading}>
               {atlasLoading ? 'Carregando...' : 'Atualizar'}
@@ -266,6 +268,7 @@ export function Associados() {
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {!atlasLoading && !atlasError && (
             <p className="mb-3 text-sm text-slate-500">Exibindo {atlasContracts.length} de {atlasCount.toLocaleString('pt-BR')} contratos • página {atlasPage} de {Math.max(1, Math.ceil(atlasCount / ATLAS_PAGE_SIZE))}.</p>
+            <p className="mb-3 text-sm font-medium text-slate-700 dark:text-slate-300">MovSat: {associadosComRastreador.length} associados com rastreador • {totalRastreadoresVinculados} rastreadores vinculados</p>
           )}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -284,7 +287,7 @@ export function Associados() {
                     <td className="p-2">{(() => {
                       const personId = contract.person_id == null ? '' : String(contract.person_id);
                       const person = atlasPeople[personId] ?? contract.person as Record<string, unknown> | undefined;
-                      const personName = person?.name ?? person?.full_name ?? person?.social_name ?? person?.corporate_name ?? contract.person_name ?? contract.person_full_name ?? contract.name;
+                      const personName = person?.name ?? person?.full_name ?? person?.person_name ?? person?.nome ?? person?.legal_name ?? person?.corporate_name ?? person?.social_name ?? person?.razao_social ?? person?.nome_completo ?? contract.person_name ?? contract.person_full_name ?? contract.name;
                       return String(personName ?? (personId ? `Pessoa #${personId}` : '—'));
                     })()}</td>
                     <td className="p-2">{String(contract.contract_status ?? contract.status ?? '—')}</td>
