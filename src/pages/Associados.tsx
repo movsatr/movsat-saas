@@ -206,7 +206,7 @@ export function Associados() {
       };
       await Promise.all(Array.from({ length: Math.min(5, matchedPairs.length) }, () => objectWorker()));
 
-      const uniqueRows = Array.from(new Map(objectRows.map((row) => [String(row.id ?? ((row.vehicle_data ?? {}) as Record<string, unknown>).plate ?? Math.random()), row])).values());
+      const uniqueRows = Array.from(new Map(objectRows.map((row) => [String(row.id ?? `${((row.vehicle_data ?? {}) as Record<string, unknown>).plate ?? ''}::${((row.contract_data ?? {}) as Record<string, unknown>).contract_id ?? ''}`), row])).values());
       uniqueRows.sort((a, b) =>
         String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')
           .localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? ''))
