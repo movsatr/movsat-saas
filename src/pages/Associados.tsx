@@ -122,101 +122,86 @@ export function Associados() {
         return payload;
       };
 
-      // Lista contratos e consulta o produto 0013 sempre dentro de um contrato/objeto válido.
-      const contractPayload = await readResource(
-        `${baseUrl}?resource=contracts&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
-        'Falha ao consultar contratos da Atlas.'
+      // O endpoint nested traz os objetos com dados do veículo e do associado.
+      // Filtramos pelo produto 0013 dentro de cada contrato, sem filtrar fornecedor.
+      const objectsPayload = await readResource(
+        `${baseUrl}?resource=contract_object_nested&page=${page}&page_size=${ATLAS_PAGE_SIZE}`,
+        'Falha ao consultar a lista de objetos da Atlas.'
       );
-      const contracts = readRows(contractPayload);
-      const contractCount = readCount(contractPayload);
+      const objects = readRows(objectsPayload);
+      const objectCount = readCount(objectsPayload);
 
-      let contractIndex = 0;
-      const matchedPairs: Array<{ product: Record<string, unknown>; contract: Record<string, unknown> }> = [];
-      const contractWorker = async () => {
+      const byContract = new Map<string, Record<string, unknown>[]>();
+      for (const object of objects) {
+        if (object.id == null || object.contract_id == null) continue;
+        const key = String(object.contract_id);
+        const existing = byContract.get(key) ?? [];
+        existing.push(object);
+        byContract.set(key, existing);
+      }
+
+      const entries = Array.from(byContract.entries());
+      let groupIndex = 0;
+      const matched: Record<string, unknown>[] = [];
+      const worker = async () => {
         while (true) {
-          const index = contractIndex++;
-          if (index >= contracts.length) return;
-          const contract = contracts[index];
-          if (contract.id == null) continue;
-          const payload = await readResource(
-            `${baseUrl}?resource=contract_object_product&contract_id=${encodeURIComponent(String(contract.id))}&product_id=13&page_size=100`,
-            `Falha ao consultar os produtos do contrato ${String(contract.id)}.`
+          const index = groupIndex++;
+          if (index >= entries.length) return;
+          const [contractId, contractObjects] = entries[index];
+          const productPayload = await readResource(
+            `${baseUrl}?resource=contract_object_product&contract_id=${encodeURIComponent(contractId)}&product_id=13&page_size=100`,
+            `Falha ao consultar produto Rastreador do contrato ${contractId}.`
           );
-          for (const product of readRows(payload)) {
+          const productRows = readRows(productPayload).filter((product) => {
             const productId = String(product.product_id ?? '').trim();
-            const productCode = String(product.product_code ?? product.code ?? product.product?.code ?? '').trim();
-            if (productId !== '13' && productId !== '0013' && productCode !== '0013') continue;
-            matchedPairs.push({ product, contract });
-          }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(5, contracts.length) }, () => contractWorker()));
-
-      let objectIndex = 0;
-      const objectRows: Record<string, unknown>[] = [];
-      const objectWorker = async () => {
-        while (true) {
-          const index = objectIndex++;
-          if (index >= matchedPairs.length) return;
-          const { product, contract } = matchedPairs[index];
-          const objectId = product.contract_object_id ?? product.object_id;
-          if (objectId == null) continue;
-          const id = String(objectId);
-
-          let objectPayload = await readResource(
-            `${baseUrl}?resource=contract_object_vehicle&id=${encodeURIComponent(id)}&page_size=10`,
-            `Falha ao consultar o objeto ${id} da Atlas.`
-          );
-          let rows = readRows(objectPayload);
-          if (rows.length === 0) {
-            objectPayload = await readResource(
-              `${baseUrl}?resource=contract_object_nested&id=${encodeURIComponent(id)}&page_size=10`,
-              `Falha ao consultar os detalhes do objeto ${id} da Atlas.`
-            );
-            rows = readRows(objectPayload);
-          }
-          const row = rows.find((item) => String(item.id ?? '') === id) ?? rows[0];
-          if (!row) continue;
-
-          const person = (row.person_data ?? row.person ?? {}) as Record<string, unknown>;
-          const vehicle = (row.vehicle_data ?? row.vehicle ?? {}) as Record<string, unknown>;
-          const rowContract = (row.contract_data ?? row.contract ?? contract) as Record<string, unknown>;
-          objectRows.push({
-            ...row,
-            person_data: {
-              ...person,
-              id: person.id ?? row.person_id,
-              name: person.name ?? person.person_name ?? row.person_name ?? row.name,
-              cpf_cnpj: person.cpf_cnpj ?? person.person_cpf_cnpj ?? row.person_cpf_cnpj,
-            },
-            vehicle_data: {
-              ...vehicle,
-              plate: vehicle.plate ?? vehicle.vehicle_plate ?? row.vehicle_plate ?? row.plate,
-              assembler: vehicle.assembler ?? vehicle.make ?? row.vehicle_assembler ?? row.assembler,
-              model: vehicle.model ?? row.vehicle_model ?? row.model,
-            },
-            contract_data: {
-              ...rowContract,
-              contract_id: rowContract.contract_id ?? row.contract_id ?? contract.id,
-              contract_status: rowContract.contract_status ?? row.contract_status ?? contract.contract_status,
-            },
-            product_code: '0013',
+            const productCode = String(product.product_code ?? product.code ?? '').trim();
+            return (productId === '13' || productId === '0013' || productCode === '0013') && product.deleted !== true;
           });
+          const matchedIds = new Set(productRows
+            .map((product) => product.contract_object_id)
+            .filter((id) => id != null)
+            .map((id) => String(id)));
+          for (const object of contractObjects) {
+            if (!matchedIds.has(String(object.id))) continue;
+            const person = (object.person_data ?? {}) as Record<string, unknown>;
+            const vehicle = (object.vehicle_data ?? {}) as Record<string, unknown>;
+            matched.push({
+              ...object,
+              person_data: {
+                ...person,
+                id: person.id ?? object.person_id,
+                name: person.name ?? object.person_name ?? object.name,
+                cpf_cnpj: person.cpf_cnpj ?? object.person_cpf_cnpj,
+              },
+              vehicle_data: {
+                ...vehicle,
+                plate: vehicle.plate ?? object.vehicle_plate ?? object.plate,
+                assembler: vehicle.assembler ?? object.vehicle_assembler ?? object.assembler,
+                model: vehicle.model ?? object.vehicle_model ?? object.model,
+                chassi: vehicle.chassi ?? object.vehicle_chassi,
+                renavam: vehicle.renavam ?? object.vehicle_renavam,
+              },
+              contract_data: {
+                contract_id: object.contract_id,
+                contract_status: object.contract_status,
+              },
+              product_code: '0013',
+            });
+          }
         }
       };
-      await Promise.all(Array.from({ length: Math.min(5, matchedPairs.length) }, () => objectWorker()));
+      await Promise.all(Array.from({ length: Math.min(6, entries.length) }, () => worker()));
 
-      const uniqueRows = Array.from(new Map(objectRows.map((row) => [String(row.id ?? `${((row.vehicle_data ?? {}) as Record<string, unknown>).plate ?? ''}::${((row.contract_data ?? {}) as Record<string, unknown>).contract_id ?? ''}`), row])).values());
-      uniqueRows.sort((a, b) =>
+      matched.sort((a, b) =>
         String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')
           .localeCompare(String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? ''))
       );
-      setAtlasContracts(uniqueRows);
+      setAtlasContracts(matched);
       setAtlasPage(page);
-      setAtlasCount(uniqueRows.length);
-      setAtlasTotalPages(Math.max(1, Math.ceil(contractCount / ATLAS_PAGE_SIZE)));
-      if (matchedPairs.length > 0 && uniqueRows.length === 0) {
-        setAtlasError('A Atlas retornou o produto 0013, mas não foi possível carregar os dados dos objetos vinculados.');
+      setAtlasCount(matched.length);
+      setAtlasTotalPages(Math.max(1, Math.ceil(objectCount / ATLAS_PAGE_SIZE)));
+      if (matched.length === 0) {
+        setAtlasError('Nenhum produto 0013 encontrado nos objetos desta página. Avance para a próxima página ou pesquise o contrato específico.');
       }
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
@@ -335,7 +320,7 @@ export function Associados() {
           {!atlasError && (
             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Veículos com produto 0013 nesta página</p>
+                <p className="text-xs text-slate-500">Veículos com produto 0013 nesta página de objetos</p>
                 <p className="mt-1 text-xl font-semibold">{atlasCount.toLocaleString('pt-BR')}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
@@ -367,7 +352,7 @@ export function Associados() {
                     <td className="px-3 py-3">{String(contract.contract_status ?? '—')}</td>
                   </tr>;
                 })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>Nenhum objeto desta página possui o produto 0013. Use Próxima para consultar a página seguinte.</td></tr>}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>Nenhum produto 0013 encontrado nos objetos desta página. Avance para a próxima página.</td></tr>}
               </tbody>
             </table>
           </div>
