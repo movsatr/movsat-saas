@@ -149,7 +149,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(req, 500, { error: "profile_check_failed" });
     }
 
-    if (profile?.role !== "administrador") {
+    if (profile?.role !== "administrador" && profile?.role !== "diretoria") {
       return jsonResponse(req, 403, { error: "administrator_required" });
     }
 

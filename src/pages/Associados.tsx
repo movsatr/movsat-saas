@@ -38,9 +38,7 @@ export function Associados() {
   const [atlasPage, setAtlasPage] = useState(1);
   const [atlasCount, setAtlasCount] = useState(0);
   const [atlasTotalPages, setAtlasTotalPages] = useState(1);
-  const ATLAS_PAGE_SIZE = 25;
-
-  useEffect(() => {
+  const ATLAS_PAGE_SIZE = 25;  useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
@@ -91,7 +89,7 @@ export function Associados() {
   };
 
   const loadAtlasContracts = async (page = atlasPage) => {
-    if (role !== 'administrador') return;
+    if (role !== 'administrador' && role !== 'diretoria') return;
     setAtlasLoading(true);
     setAtlasError(null);
     try {
@@ -100,75 +98,122 @@ export function Associados() {
       if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente.');
       const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
+
+      // Consulta direta à rota documentada de produtos, já filtrada pelo
+      // produto de rastreamento (0013). Elimina a cascata de uma chamada
+      // por objeto de contrato e compara o código aceitando número ou texto.
       const currentPage = Math.max(1, page);
-      const response = await fetch(
-        `${baseUrl}?resource=contract_object_nested&page=${currentPage}&page_size=${ATLAS_PAGE_SIZE}`,
-        { headers, signal: AbortSignal.timeout(35000) }
-      );
-      const payload = await response.json();
-      if (!response.ok || payload?.ok === false) throw new Error(payload?.error || 'Falha ao consultar objetos de contrato da Atlas.');
-
-      const root = payload?.data;
-      const body = root?.data ?? root;
-      const objectRows = (Array.isArray(body) ? body : body?.results ?? body?.items ?? body?.data ?? []) as Record<string, unknown>[];
-      const total = Number(body?.count ?? body?.total ?? objectRows.length);
-      const totalPages = Math.max(1, Math.ceil((Number.isFinite(total) ? total : objectRows.length) / ATLAS_PAGE_SIZE));
-      const candidates = objectRows.filter((row) =>
-        row.deleted !== true && (!row.object_type || String(row.object_type).toUpperCase() === 'VEHICLE') && (row.id != null)
-      );
-
-      const matched: Record<string, unknown>[] = [];
-      const errors: string[] = [];
-      for (let offset = 0; offset < candidates.length; offset += 5) {
-        const batch = candidates.slice(offset, offset + 5);
-        const results = await Promise.all(batch.map(async (object) => {
-          const id = String(object.id);
-          const query = new URLSearchParams({ resource: 'contract_object_product', contract_object_id: id, page: '1', page_size: '100' });
-          const productResponse = await fetch(`${baseUrl}?${query.toString()}`, {
-            headers,
-            signal: AbortSignal.timeout(35000),
-          });
-          const productPayload = await productResponse.json();
-          if (!productResponse.ok || productPayload?.ok === false) {
-            errors.push(`objeto ${id}: ${productPayload?.error ?? 'erro na consulta de produto'}`);
-            return null;
-          }
-          const productRoot = productPayload?.data;
-          const productBody = productRoot?.data ?? productRoot;
-          const products = (Array.isArray(productBody) ? productBody : productBody?.results ?? productBody?.items ?? productBody?.data ?? []) as Record<string, unknown>[];
-          const hasTracker = products.some((product) =>
-            String(product.product_id ?? product.product_code ?? '') === '13' &&
-            product.deleted !== true && product.activated !== false
-          );
-          return hasTracker ? object : null;
-        }));
-        for (const result of results) if (result) matched.push(result);
+      const productQuery = new URLSearchParams({
+        resource: 'contract_object_product',
+        product_id: '13',
+        page: String(currentPage),
+        page_size: String(ATLAS_PAGE_SIZE),
+      });
+      const productResponse = await fetch(`${baseUrl}?${productQuery.toString()}`, {
+        headers,
+        signal: AbortSignal.timeout(35000),
+      });
+      const productPayload = await productResponse.json();
+      if (!productResponse.ok || productPayload?.ok === false) {
+        throw new Error(productPayload?.error || 'Falha ao consultar produtos de rastreamento da Atlas.');
       }
 
-      const found = matched.map((row) => ({
-        ...row,
-        person_data: row.person_data ?? {},
-        vehicle_data: row.vehicle_data ?? {},
-        contract_data: {
-          ...((row.contract_data ?? {}) as Record<string, unknown>),
-          contract_id: ((row.contract_data ?? {}) as Record<string, unknown>).contract_id ?? row.contract_id ?? '—',
-          contract_status: ((row.contract_data ?? {}) as Record<string, unknown>).contract_status ?? row.contract_status ?? '—',
-        },
-        product_code: '0013',
-      })).sort((a, b) =>
+      const productRoot = productPayload?.data;
+      const productBody = productRoot?.data ?? productRoot;
+      const productRows = (Array.isArray(productBody)
+        ? productBody
+        : productBody?.results ?? productBody?.items ?? productBody?.data ?? []) as Record<string, unknown>[];
+
+      const activeProducts = productRows.filter((product) =>
+        product.deleted !== true &&
+        product.activated !== false &&
+        String(product.product_id ?? product.product_code ?? '') === '13'
+      );
+      if (activeProducts.length === 0) {
+        setAtlasContracts([]);
+        setAtlasPage(currentPage);
+        setAtlasCount(0);
+        setAtlasTotalPages(1);
+        setAtlasError(`A Atlas não retornou produtos de rastreamento ativos na página ${currentPage}.`);
+        return;
+      }
+
+      // Os produtos trazem o vínculo com objeto de contrato, pessoa e veículo
+      // (contract_object_id / object_id). Usamos os dados embutidos quando
+      // presentes e completamos o restante consultando a rota de objetos por
+      // lote de ids — comportamento documentado e compatível com a resposta real.
+      const objectsById = new Map<string, Record<string, unknown>>();
+      const enrichRows = async (rows: Record<string, unknown>[]) => {
+        const needsObject = rows.filter((row) => {
+          const embedded = (row.contract_object ?? row.object ?? null) as Record<string, unknown> | null;
+          return !embedded && row.contract_object_id != null;
+        });
+        for (let offset = 0; offset < needsObject.length; offset += 10) {
+          const batch = needsObject.slice(offset, offset + 10);
+          await Promise.all(batch.map(async (product) => {
+            const objectId = String(product.contract_object_id ?? product.object_id ?? '');
+            if (!objectId || objectsById.has(objectId)) return;
+            const objectQuery = new URLSearchParams({
+              resource: 'contract_object',
+              id: objectId,
+              page: '1',
+              page_size: '1',
+            });
+            const objectResponse = await fetch(`${baseUrl}?${objectQuery.toString()}`, {
+              headers,
+              signal: AbortSignal.timeout(35000),
+            });
+            const objectPayload = await objectResponse.json();
+            if (!objectResponse.ok || objectPayload?.ok === false) return;
+            const objectRoot = objectPayload?.data;
+            const objectBody = objectRoot?.data ?? objectRoot;
+            const objectRows = (Array.isArray(objectBody)
+              ? objectBody
+              : objectBody?.results ?? objectBody?.items ?? objectBody?.data ?? []) as Record<string, unknown>[];
+            if (objectRows.length > 0) objectsById.set(objectId, objectRows[0]);
+          }));
+        }
+      };
+
+      await enrichRows(activeProducts);
+
+      const found = activeProducts.map((product) => {
+        const embedded = (product.contract_object ?? product.object ?? null) as Record<string, unknown> | null;
+        const object = embedded ?? objectsById.get(String(product.contract_object_id ?? product.object_id ?? '')) ?? {};
+        const person = ((object.person_data ?? product.person_data ?? {}) as Record<string, unknown>);
+        const vehicle = ((object.vehicle_data ?? product.vehicle_data ?? {}) as Record<string, unknown>);
+        const contract = {
+          ...((object.contract_data ?? {}) as Record<string, unknown>),
+          contract_id: ((object.contract_data ?? {}) as Record<string, unknown>).contract_id
+            ?? object.contract_id
+            ?? product.contract_id
+            ?? '—',
+          contract_status: ((object.contract_data ?? {}) as Record<string, unknown>).contract_status
+            ?? object.contract_status
+            ?? product.contract_status
+            ?? '—',
+        };
+        return {
+          ...object,
+          id: product.id ?? object.id ?? product.contract_object_id,
+          person_data: person,
+          vehicle_data: vehicle,
+          contract_data: contract,
+          product_code: '0013',
+        };
+      }).sort((a, b) =>
         String(((a.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '').localeCompare(
           String(((b.vehicle_data ?? {}) as Record<string, unknown>).plate ?? '')
         )
       );
 
+      const total = Number(productBody?.count ?? productBody?.total ?? activeProducts.length);
+      const totalPages = Math.max(1, Math.ceil((Number.isFinite(total) ? total : activeProducts.length) / ATLAS_PAGE_SIZE));
+
       setAtlasContracts(found);
       setAtlasPage(currentPage);
       setAtlasCount(found.length);
       setAtlasTotalPages(totalPages);
-      if (found.length === 0) {
-        const errorDetail = errors.length ? ` Falhas ao verificar produtos: ${errors.slice(0, 3).join('; ')}` : '';
-        setAtlasError(`A Atlas retornou ${objectRows.length} objetos na página ${currentPage}, mas nenhum foi confirmado como produto de rastreamento 0013.${errorDetail}`);
-      }
     } catch (error) {
       setAtlasError(error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.');
     } finally {
@@ -177,7 +222,7 @@ export function Associados() {
   };
 
   useEffect(() => { loadData(); }, []);
-  useEffect(() => { if (role === 'administrador') loadAtlasContracts(1); }, [role]);
+  useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(1); }, [role]);
 
   const toggleRow = (id: string) => {
     setExpandedRows((prev) => {
@@ -273,24 +318,29 @@ export function Associados() {
         action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Associado</Button> : undefined}
       />
 
-      {role === 'administrador' && (
+      {(role === 'administrador' || role === 'diretoria') && (
         <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-slate-900 dark:text-white">Frota rastreada — Atlas</h2>
-              <p className="mt-1 text-sm text-slate-500">Veículos da Atlas retornados pela rota oficial de objetos com rastreador Softruck.</p>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Integração Atlas/Mutual</h2>
+                <Badge color="slate">origem dos dados</Badge>
+                <Badge color="blue">somente leitura</Badge>
+              </div>
+              <p className="mt-1 text-sm text-slate-500">Veículos com rastreador Softruck (produto 0013) retornados pela Atlas. Não altera os cadastros do MovSat.</p>
             </div>
-            <Button onClick={() => loadAtlasContracts(atlasError ? Math.min(atlasPage + 1, atlasTotalPages) : 1)} disabled={atlasLoading || (Boolean(atlasError) && atlasPage >= atlasTotalPages)}>{atlasLoading ? 'Buscando…' : atlasError ? 'Buscar próxima página' : 'Atualizar'}</Button>
+            <Button variant="secondary" onClick={() => loadAtlasContracts(atlasError ? Math.min(atlasPage + 1, atlasTotalPages) : 1)} disabled={atlasLoading || (Boolean(atlasError) && atlasPage >= atlasTotalPages)}>{atlasLoading ? 'Buscando…' : atlasError ? 'Buscar próxima página' : 'Atualizar'}</Button>
           </div>
+          {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando a Atlas…</p>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
-          {!atlasError && (
+          {!atlasError && atlasContracts.length > 0 && (
             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Veículos retornados nesta página</p>
+                <p className="text-xs text-slate-500">Veículos com produto 0013 nesta página</p>
                 <p className="mt-1 text-xl font-semibold">{atlasCount.toLocaleString('pt-BR')}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Associados distintos rastreados</p>
+                <p className="text-xs text-slate-500">Associados distintos na Atlas</p>
                 <p className="mt-1 text-xl font-semibold">{new Set(atlasContracts.map((row) => (row.person_data ?? {}) as Record<string, unknown>).map((person) => String(person.id ?? person.cpf_cnpj ?? person.name ?? '')).filter(Boolean)).size}</p>
               </div>
               <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
@@ -302,7 +352,7 @@ export function Associados() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                <th className="px-3 py-3">Associado Atlas</th><th className="px-3 py-3">CPF/CNPJ</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato</th><th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Associado</th><th className="px-3 py-3">CPF/CNPJ</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato</th><th className="px-3 py-3">Status</th>
               </tr></thead>
               <tbody>
                 {atlasContracts.map((row, index) => {
@@ -318,13 +368,13 @@ export function Associados() {
                     <td className="px-3 py-3">{String(contract.contract_status ?? '—')}</td>
                   </tr>;
                 })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>A consulta verifica uma página por vez para evitar timeout da API Atlas.</td></tr>}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>Nenhum veículo com produto 0013 nesta página.</td></tr>}
               </tbody>
             </table>
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
             <Button variant="secondary" disabled={atlasLoading || atlasPage <= 1} onClick={() => loadAtlasContracts(atlasPage - 1)}>Anterior</Button>
-            <span className="text-xs text-slate-500">Objetos consultados até a página {atlasPage} / {atlasTotalPages}</span>
+            <span className="text-xs text-slate-500">Página {atlasPage} de {atlasTotalPages} — resultados com produto 0013</span>
             <Button variant="secondary" disabled={atlasLoading || atlasPage >= atlasTotalPages} onClick={() => loadAtlasContracts(atlasPage + 1)}>Próxima</Button>
           </div>
         </section>

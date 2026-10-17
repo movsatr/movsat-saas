@@ -1,4 +1,14 @@
 
+[functions.atlas-api]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/atlas-api/index.ts"
+
+[functions.n8n-webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/n8n-webhook/index.ts"
+
 [functions.create-user]
 enabled = true
 verify_jwt = false
