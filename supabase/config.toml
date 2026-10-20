@@ -16,6 +16,10 @@ import_map = "./functions/create-user/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
 entrypoint = "./functions/create-user/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
+# Specifies static files for functions:
 # static_files = [ "./functions/create-user/*.html" ]
+
+[functions.softruck-v5-api]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/softruck-v5-api/index.ts"
