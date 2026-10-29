@@ -35,9 +35,7 @@ export function Associados() {
   const [atlasContracts, setAtlasContracts] = useState<Record<string, unknown>[]>([]);
   const [atlasLoading, setAtlasLoading] = useState(false);
   const [atlasError, setAtlasError] = useState<string | null>(null);
-  const [atlasPage, setAtlasPage] = useState(1);
   const [atlasCount, setAtlasCount] = useState(0);
-  const [atlasTotalPages, setAtlasTotalPages] = useState(1);
   const ATLAS_CONTRACTS_PER_PAGE = 50;
   const ATLAS_PRODUCT_ID = '283';
   const ATLAS_PROBE_CONCURRENCY = 8;
@@ -265,9 +263,7 @@ export function Associados() {
       );
 
       setAtlasContracts(found);
-      setAtlasPage(1);
       setAtlasCount(found.length);
-      setAtlasTotalPages(1);
       setAtlasError(null);
     } catch (error) {
       setAtlasContracts([]);
