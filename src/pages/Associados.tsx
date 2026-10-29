@@ -202,8 +202,8 @@ export function Associados() {
       }
 
       // Evita duplicar o mesmo vínculo quando a API repetir registros entre páginas.
-      const uniqueProducts = [...new Map(productRows.map((row) => [
-        String(row.id ?? row.object_id ?? `${row.contract_id ?? ''}-${row.plate ?? ''}-${row.product_id ?? ATLAS_PRODUCT_ID}`),
+      const uniqueProducts = [...new Map<string, Record<string, unknown>>(productRows.map((row): [string, Record<string, unknown>] => [
+        String(row.id ?? row.object_id ?? `${row.contract_id ?? ''}-${row.plate ?? row.vehicle_plate ?? ''}-${row.product_id ?? ATLAS_PRODUCT_ID}`),
         row,
       ])).values()];
 
