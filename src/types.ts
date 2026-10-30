@@ -126,7 +126,7 @@ export interface OrdemServico {
 export interface FinanceiroRecord {
   id: string;
   associado_id: string;
-  tipo: 'mensalidade' | 'instalacao' | 'manutencao' | 'outro';
+  tipo: 'mensalidade' | 'instalacao' | 'manutencao' | 'rastreamento' | 'assistencia' | 'servico' | 'outro';
   descricao: string;
   valor: number;
   status: 'pago' | 'pendente' | 'atrasado' | 'cancelado';
