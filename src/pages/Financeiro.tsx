@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2, DollarSign, Banknote, Wallet, AlertTriangle, Filter } from 'lucide-react';
+import { Plus, Pencil, Trash2, DollarSign, Banknote, Wallet, AlertTriangle, Filter, CalendarDays } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/lib/toast';
@@ -10,7 +10,20 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, formatCurrency, formatDate, MetricCard } from '@/components/ui';
 import type { FinanceiroRecord, Associado } from '@/types';
 
-type FinanceiroWithAssoc = FinanceiroRecord & { associado?: { nome: string } | null };
+type FinanceiroWithAssoc = FinanceiroRecord & { associado?: { nome: string } | null; nome_associado?: string };
+
+const localDate = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const effectiveStatus = (row: FinanceiroWithAssoc): FinanceiroRecord['status'] => {
+  if (row.status === 'pendente' && row.data_vencimento && row.data_vencimento < localDate()) return 'atrasado';
+  return row.status;
+};
 
 type StatusFilter = 'all' | FinanceiroRecord['status'];
 
@@ -18,6 +31,9 @@ const tipoLabels: Record<FinanceiroRecord['tipo'], string> = {
   mensalidade: 'Mensalidade',
   instalacao: 'Instalação',
   manutencao: 'Manutenção',
+  rastreamento: 'Rastreamento',
+  assistencia: 'Assistência',
+  servico: 'Serviço',
   outro: 'Outro',
 };
 
@@ -46,6 +62,7 @@ function FinanceiroContent() {
   const [associados, setAssociados] = useState<Associado[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [periodFilter, setPeriodFilter] = useState('');
   const [editing, setEditing] = useState<FinanceiroWithAssoc | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<FinanceiroWithAssoc | null>(null);
@@ -56,7 +73,9 @@ function FinanceiroContent() {
       supabase.from('financeiro').select('*, associado:associados(nome)').order('data_vencimento', { ascending: false }),
       supabase.from('associados').select('id, nome').order('nome'),
     ]);
-    setData((finRes.data || []) as FinanceiroWithAssoc[]);
+    if (finRes.error) toast.error(friendlyError(finRes.error, 'financeiro'));
+    if (assocRes.error) toast.error(friendlyError(assocRes.error, 'associados'));
+    setData(((finRes.data || []) as FinanceiroWithAssoc[]).map((row) => ({ ...row, nome_associado: row.associado?.nome || 'Lançamento geral' })));
     setAssociados((assocRes.data || []) as Associado[]);
     setLoading(false);
   };
@@ -68,15 +87,16 @@ function FinanceiroContent() {
       tipo: 'mensalidade',
       status: 'pendente',
       valor: 0,
-      data_vencimento: new Date().toISOString().slice(0, 10),
+      data_vencimento: localDate(),
     });
     setCreating(true);
     setEditing(null);
   };
 
   const openEdit = (row: FinanceiroWithAssoc) => {
-    const { associado, ...rest } = row;
+    const { associado, nome_associado, ...rest } = row;
     void associado;
+    void nome_associado;
     setForm(rest);
     setEditing(row);
     setCreating(false);
@@ -89,18 +109,21 @@ function FinanceiroContent() {
   };
 
   const handleSave = async () => {
-    if (!form.associado_id) { toast.error('Selecione um associado'); return; }
     if (!form.descricao?.trim()) { toast.error('Descrição é obrigatória'); return; }
+    if (form.valor == null || Number(form.valor) <= 0 || !Number.isFinite(Number(form.valor))) { toast.error('Informe um valor válido maior que zero'); return; }
+
     const payload: Record<string, unknown> = { ...form };
     delete payload.id;
     delete payload.created_at;
     delete payload.updated_at;
+    delete payload.associado;
+    delete payload.nome_associado;
+
     Object.keys(payload).forEach((k) => { if (payload[k] === '') payload[k] = null; });
     if (payload.valor != null) payload.valor = Number(payload.valor);
 
-    // If status is 'pago' and no data_pagamento, set today
     if (payload.status === 'pago' && !payload.data_pagamento) {
-      payload.data_pagamento = new Date().toISOString().slice(0, 10);
+      payload.data_pagamento = localDate();
     }
     if (payload.status !== 'pago') {
       payload.data_pagamento = null;
@@ -113,7 +136,7 @@ function FinanceiroContent() {
     if (error) { toast.error(friendlyError(error, 'financeiro')); return; }
     toast.success(editing ? 'Registro atualizado com sucesso' : 'Registro criado com sucesso');
     closeDrawer();
-    loadData();
+    void loadData();
   };
 
   const handleDelete = async () => {
@@ -122,23 +145,26 @@ function FinanceiroContent() {
     if (error) { toast.error(friendlyError(error, 'financeiro')); return; }
     toast.success('Registro excluído com sucesso');
     setDeleteTarget(null);
-    loadData();
+    void loadData();
   };
 
-  // Summary metrics
   const totalRecebido = data.filter((d) => d.status === 'pago').reduce((s, d) => s + Number(d.valor), 0);
-  const totalPendente = data.filter((d) => d.status === 'pendente').reduce((s, d) => s + Number(d.valor), 0);
-  const totalAtrasado = data.filter((d) => d.status === 'atrasado').reduce((s, d) => s + Number(d.valor), 0);
+  const totalPendente = data.filter((d) => effectiveStatus(d) === 'pendente').reduce((s, d) => s + Number(d.valor), 0);
+  const totalAtrasado = data.filter((d) => effectiveStatus(d) === 'atrasado').reduce((s, d) => s + Number(d.valor), 0);
 
-  const filteredData = statusFilter === 'all' ? data : data.filter((d) => d.status === statusFilter);
+  const filteredData = data.filter((d) => {
+    const statusMatches = statusFilter === 'all' || effectiveStatus(d) === statusFilter;
+    const periodMatches = !periodFilter || (d.data_vencimento || '').startsWith(periodFilter);
+    return statusMatches && periodMatches;
+  });
 
   const columns: Column<FinanceiroWithAssoc>[] = [
-    { key: 'associado', header: 'Associado', sortable: true, sortValue: (r) => r.associado?.nome ?? '', render: (r) => <span className="font-medium text-slate-900 dark:text-white">{r.associado?.nome || '-'}</span> },
+    { key: 'associado', header: 'Associado', sortable: true, sortValue: (r) => r.associado?.nome ?? '', render: (r) => <span className="font-medium text-slate-900 dark:text-white">{r.associado?.nome || r.nome_associado || 'Lançamento geral'}</span> },
     { key: 'tipo', header: 'Tipo', sortable: true, render: (r) => <span className="text-xs">{tipoLabels[r.tipo]}</span> },
     { key: 'descricao', header: 'Descrição', render: (r) => r.descricao },
     { key: 'valor', header: 'Valor', sortable: true, sortValue: (r) => Number(r.valor), render: (r) => <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(r.valor)}</span> },
-    { key: 'status', header: 'Status', sortable: true, render: (r) => <StatusBadge status={r.status} /> },
-    { key: 'data_vencimento', header: 'Vencimento', sortable: true, sortValue: (r) => r.data_vencimento, render: (r) => formatDate(r.data_vencimento) },
+    { key: 'status', header: 'Status', sortable: true, sortValue: (r) => effectiveStatus(r), render: (r) => <StatusBadge status={effectiveStatus(r)} /> },
+    { key: 'data_vencimento', header: 'Vencimento', sortable: true, sortValue: (r) => r.data_vencimento || '', render: (r) => formatDate(r.data_vencimento) },
     { key: 'data_pagamento', header: 'Pagamento', render: (r) => formatDate(r.data_pagamento) },
     { key: 'forma_pagamento', header: 'Forma', render: (r) => r.forma_pagamento ? <span className="capitalize text-xs">{r.forma_pagamento}</span> : '-' },
     {
@@ -170,34 +196,40 @@ function FinanceiroContent() {
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <MetricCard label="Recebido" value={formatCurrency(totalRecebido)} icon={Banknote} accent="green" />
+        <MetricCard label="Recebido (histórico)" value={formatCurrency(totalRecebido)} icon={Banknote} accent="green" />
         <MetricCard label="Pendente" value={formatCurrency(totalPendente)} icon={Wallet} accent="yellow" />
         <MetricCard label="Atrasado" value={formatCurrency(totalAtrasado)} icon={AlertTriangle} accent="red" />
         <MetricCard label="Total Geral" value={formatCurrency(totalRecebido + totalPendente + totalAtrasado)} icon={DollarSign} accent="blue" />
       </div>
 
-      {/* Status filter */}
-      <div className="flex items-center gap-2 flex-wrap mb-4">
-        <Filter className="w-4 h-4 text-slate-400" />
-        {statusOptions.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setStatusFilter(opt.value)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              statusFilter === opt.value
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-3 flex-wrap mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Filter className="w-4 h-4 text-slate-400" />
+          {statusOptions.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setStatusFilter(opt.value)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                statusFilter === opt.value
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <CalendarDays className="w-4 h-4 text-slate-400" />
+          <input aria-label="Filtrar por mês de vencimento" className="input !w-auto !py-1.5 text-xs" type="month" value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)} />
+          {periodFilter && <button className="text-xs text-blue-600 hover:underline" onClick={() => setPeriodFilter('')}>Limpar período</button>}
+        </div>
       </div>
 
       <DataTable
         data={filteredData}
         columns={columns}
-        searchKeys={['descricao']}
+        searchKeys={['descricao', 'nome_associado']}
         onRowClick={openEdit}
         emptyMessage="Nenhum registro financeiro encontrado"
       />
@@ -215,9 +247,9 @@ function FinanceiroContent() {
       >
         <div className="space-y-4">
           <div>
-            <label className="label">Associado *</label>
-            <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value })}>
-              <option value="">Selecione...</option>
+            <label className="label">Cliente / associado</label>
+            <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value || null })}>
+              <option value="">Lançamento geral / sem vínculo</option>
               {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </div>
@@ -228,6 +260,9 @@ function FinanceiroContent() {
                 <option value="mensalidade">Mensalidade</option>
                 <option value="instalacao">Instalação</option>
                 <option value="manutencao">Manutenção</option>
+                <option value="rastreamento">Rastreamento</option>
+                <option value="assistencia">Assistência</option>
+                <option value="servico">Serviço</option>
                 <option value="outro">Outro</option>
               </select>
             </div>
@@ -238,7 +273,7 @@ function FinanceiroContent() {
           </div>
           <div>
             <label className="label">Descrição *</label>
-            <input className="input" disabled={!canEdit} value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Descrição da cobrança" />
+            <input className="input" disabled={!canEdit} value={form.descricao ?? ''} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Ex.: Mensalidade de rastreamento" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -273,7 +308,7 @@ function FinanceiroContent() {
           </div>
           <div>
             <label className="label">Observações</label>
-            <textarea className="input" rows={3} disabled={!canEdit} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas financeiras" />
+            <textarea className="input" rows={3} disabled={!canEdit} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas internas sobre cobrança" />
           </div>
         </div>
       </CaseView>
