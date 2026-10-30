@@ -248,7 +248,6 @@ function FinanceiroContent() {
           <div>
             <label className="label">Cliente / associado</label>
             <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value })}>
-              <option value="">Selecione...</option>
               <option value="">Lançamento geral / sem vínculo</option>
               {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
