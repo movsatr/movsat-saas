@@ -125,12 +125,12 @@ export interface OrdemServico {
 
 export interface FinanceiroRecord {
   id: string;
-  associado_id: string;
+  associado_id: string | null;
   tipo: 'mensalidade' | 'instalacao' | 'manutencao' | 'rastreamento' | 'assistencia' | 'servico' | 'outro';
   descricao: string;
   valor: number;
   status: 'pago' | 'pendente' | 'atrasado' | 'cancelado';
-  data_vencimento: string;
+  data_vencimento: string | null;
   data_pagamento: string | null;
   forma_pagamento: 'pix' | 'boleto' | 'cartao' | 'dinheiro' | null;
   observacoes: string | null;
