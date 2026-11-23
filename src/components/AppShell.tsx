@@ -175,8 +175,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
-  const [notifLoading, setNotifLoading] = useState(true);
-
   /*
    * Se não existir perfil por algum motivo,
    * o padrão visual será operador.
@@ -200,20 +198,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       task.status === 'pendente' ||
       task.status === 'em_andamento'
   ).length;
-
-  /* =======================================================
-     DEBUG ADMIN
-     ======================================================= */
-
-  useEffect(() => {
-    console.log('MOVSAT OS - AUTENTICAÇÃO:', {
-      profile,
-      role,
-      isAdministrator: role === 'administrador',
-      currentPage: page,
-    });
-  }, [profile, role, page]);
-
   /* =======================================================
      CARREGAR NOTIFICAÇÕES E TAREFAS
      ======================================================= */
@@ -222,7 +206,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     let mounted = true;
 
     async function loadData() {
-      setNotifLoading(true);
 
       try {
         const [notificationsResponse, tasksResponse] =
@@ -275,7 +258,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         );
       } finally {
         if (mounted) {
-          setNotifLoading(false);
         }
       }
     }
