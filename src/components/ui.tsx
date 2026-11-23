@@ -1,6 +1,6 @@
 import { type ReactNode, type ButtonHTMLAttributes } from 'react';
 import {
-  CheckCircle2, AlertTriangle, XCircle, Info, Clock,
+  CheckCircle2, AlertTriangle, XCircle, Info,
   TrendingUp, TrendingDown, Minus,
 } from 'lucide-react';
 
@@ -168,9 +168,6 @@ export function LoadingSpinner({ size = 24 }: { size?: number }) {
   );
 }
 
-export function ClockIcon({ className = '' }: { className?: string }) {
-  return <Clock className={className} />;
-}
 
 export function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined) return 'R$ 0,00';
@@ -185,12 +182,6 @@ export function formatDate(date: string | null | undefined): string {
 export function formatDateTime(date: string | null | undefined): string {
   if (!date) return '-';
   return new Date(date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-export function daysBetween(date: string): number {
-  const d = new Date(date + (date.includes('T') ? '' : 'T00:00:00'));
-  const now = new Date();
-  return Math.floor((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 export function daysSince(date: string): number {
