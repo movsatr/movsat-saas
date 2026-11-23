@@ -1,4 +1,4 @@
-import { Lightbulb, TrendingUp, AlertTriangle, TrendingDown } from 'lucide-react';
+import { Lightbulb, TrendingUp, AlertTriangle } from 'lucide-react';
 import { type ReactNode } from 'react';
 
 type InsightType = 'opportunity' | 'warning' | 'success' | 'info';
@@ -33,5 +33,3 @@ export function InsightCard({
     </div>
   );
 }
-
-export { TrendingDown };
