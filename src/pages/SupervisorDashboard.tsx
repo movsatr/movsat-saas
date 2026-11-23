@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react';
 import { ListTodo, Wrench, WifiOff, Package, CalendarClock, AlertOctagon, ArrowRight, CheckCircle2, TrendingDown } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/contexts/AuthContext';
 import { loadSupervisorData, type SupervisorData } from '@/lib/insights';
 import { MetricCard, Button, Badge, formatCurrency, formatDate, LoadingSpinner, EmptyState } from '@/components/ui';
 import { CaseView } from '@/components/CaseView';
-import { OperadorDashboard } from '@/pages/OperadorDashboard';
 
 type ActionCategory =
   | 'overdue_os' | 'offline_trackers' | 'low_stock' | 'installations' | 'high_alerts' | 'tasks_today';
@@ -152,7 +150,6 @@ const severityStyles: Record<string, { border: string; bg: string; badge: string
 };
 
 export function SupervisorDashboard() {
-  const { profile } = useAuth();
   const [data, setData] = useState<SupervisorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ActionCategory | 'all'>('all');
@@ -162,12 +159,6 @@ export function SupervisorDashboard() {
   useEffect(() => {
     loadSupervisorData().then((d) => { setData(d); setLoading(false); });
   }, []);
-
-  // Role guard: operadores never see this dashboard — redirect to their own.
-  if (profile?.role === 'operador') {
-    return <OperadorDashboard />;
-  }
-
   if (loading || !data) return <LoadingSpinner />;
 
   const allCards = buildActionCards(data);
