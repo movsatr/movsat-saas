@@ -38,7 +38,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   const loadProfile = useCallback(async (uid: string) => {
-    console.log('MOVSAT AUTH: buscando profile:', uid);
 
     try {
       const query = supabase
@@ -66,11 +65,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null;
       }
 
-      console.log(
-        'MOVSAT AUTH: profile carregado:',
-        data
-      );
-
       return data as Profile | null;
     } catch (error) {
       console.error(
@@ -83,9 +77,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const initializeAuth = useCallback(async () => {
-    console.log(
-      'MOVSAT AUTH: iniciando autenticação...'
-    );
 
     try {
       const timeout = new Promise<never>((_, reject) => {
@@ -108,11 +99,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const currentSession = result.data.session;
 
-      console.log(
-        'MOVSAT AUTH: sessão encontrada:',
-        currentSession
-      );
-
       setSession(currentSession);
 
       if (currentSession?.user) {
@@ -133,9 +119,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       setProfile(null);
     } finally {
-      console.log(
-        'MOVSAT AUTH: finalizando loading'
-      );
 
       setLoading(false);
     }
@@ -150,18 +133,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
-        console.log(
-          'MOVSAT AUTH EVENT:',
-          event,
-          currentSession?.user?.email
-        );
 
         if (!mounted) return;
 
         if (event === 'PASSWORD_RECOVERY') {
-          console.log(
-            'MOVSAT AUTH: recuperação de senha detectada'
-          );
 
           setPasswordRecovery(true);
         }
@@ -198,10 +173,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(
     async (email: string, password: string) => {
-      console.log(
-        'MOVSAT AUTH: tentando login:',
-        email
-      );
 
       const { error } =
         await supabase.auth.signInWithPassword({
@@ -220,10 +191,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      console.log(
-        'MOVSAT AUTH: login realizado'
-      );
-
       return {
         error: null,
       };
@@ -233,9 +200,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updatePassword = useCallback(
     async (password: string) => {
-      console.log(
-        'MOVSAT AUTH: atualizando senha'
-      );
 
       const { error } =
         await supabase.auth.updateUser({
@@ -253,10 +217,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      console.log(
-        'MOVSAT AUTH: senha atualizada com sucesso'
-      );
-
       return {
         error: null,
       };
@@ -265,9 +225,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const finishPasswordRecovery = useCallback(() => {
-    console.log(
-      'MOVSAT AUTH: finalizando recuperação de senha'
-    );
 
     setPasswordRecovery(false);
   }, []);
