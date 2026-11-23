@@ -54,7 +54,7 @@ export function Automacao() {
 
   const loadAll = async () => {
     setLoading(true);
-    const [r, q, s, e, statsRes] = await Promise.all([
+    const [r, q, s, scheduledRes, e, statsRes] = await Promise.all([
       supabase.from('automation_rules').select('*').order('created_at', { ascending: false }),
       supabase.from('automation_logs').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('automation_queue').select('*').order('created_at', { ascending: false }).limit(50),
@@ -64,7 +64,7 @@ export function Automacao() {
     ]);
     setRules((r.data || []) as AutomationRule[]);
     setQueue((q.data || []) as AutomationQueueItem[]);
-    setScheduled((s.data || []) as ScheduledTask[]);
+    setScheduled((scheduledRes.data || []) as ScheduledTask[]);
     setEvents((e.data || []) as EventLog[]);
 
     // Compute automation statistics from all logs
