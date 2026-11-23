@@ -24,14 +24,64 @@
     border-color: theme('colors.slate.700');
   }
 
-  body {
-    @apply bg-slate-50 text-slate-900 antialiased;
-    font-feature-settings: "cv11", "ss01";
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  :root {
+    color-scheme: light;
+    --ms-color-brand: 185 28 28;
+    --ms-color-brand-hover: 153 27 27;
+    --ms-color-brand-subtle: 254 242 242;
+    --ms-color-canvas: 248 250 252;
+    --ms-color-surface: 255 255 255;
+    --ms-color-surface-raised: 255 255 255;
+    --ms-color-text: 15 23 42;
+    --ms-color-text-muted: 71 85 105;
+    --ms-color-text-subtle: 100 116 139;
+    --ms-color-border: 226 232 240;
+    --ms-color-border-strong: 203 213 225;
+    --ms-color-success: 22 101 52;
+    --ms-color-success-subtle: 240 253 244;
+    --ms-color-warning: 161 98 7;
+    --ms-color-warning-subtle: 254 252 232;
+    --ms-color-danger: 185 28 28;
+    --ms-color-danger-subtle: 254 242 242;
+    --ms-color-info: 29 78 216;
+    --ms-color-info-subtle: 239 246 255;
+    --ms-radius-control: 0.5rem;
+    --ms-radius-panel: 0.75rem;
+    --ms-shadow-panel: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.08);
+    --ms-focus-ring: 0 0 0 3px rgb(185 28 28 / 0.22);
   }
 
-  .dark body {
-    @apply bg-slate-950 text-slate-100;
+  .dark {
+    color-scheme: dark;
+    --ms-color-brand: 220 38 38;
+    --ms-color-brand-hover: 185 28 28;
+    --ms-color-brand-subtle: 69 10 10;
+    --ms-color-canvas: 2 6 23;
+    --ms-color-surface: 15 23 42;
+    --ms-color-surface-raised: 30 41 59;
+    --ms-color-text: 241 245 249;
+    --ms-color-text-muted: 203 213 225;
+    --ms-color-text-subtle: 148 163 184;
+    --ms-color-border: 51 65 85;
+    --ms-color-border-strong: 71 85 105;
+    --ms-color-success: 134 239 172;
+    --ms-color-success-subtle: 20 48 34;
+    --ms-color-warning: 253 224 71;
+    --ms-color-warning-subtle: 66 44 12;
+    --ms-color-danger: 252 165 165;
+    --ms-color-danger-subtle: 69 10 10;
+    --ms-color-info: 147 197 253;
+    --ms-color-info-subtle: 23 37 84;
+    --ms-shadow-panel: 0 1px 2px rgb(0 0 0 / 0.24), 0 1px 3px rgb(0 0 0 / 0.32);
+    --ms-focus-ring: 0 0 0 3px rgb(248 113 113 / 0.3);
+  }
+
+  body {
+    @apply antialiased;
+    background-color: rgb(var(--ms-color-canvas));
+    color: rgb(var(--ms-color-text));
+    font-feature-settings: "cv11", "ss01";
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
 
   ::-webkit-scrollbar {
@@ -51,23 +101,56 @@
 
 @layer components {
   .card {
-    @apply bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm;
+    @apply rounded-xl border;
+    background-color: rgb(var(--ms-color-surface));
+    border-color: rgb(var(--ms-color-border));
+    box-shadow: var(--ms-shadow-panel);
   }
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98];
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+    border-radius: var(--ms-radius-control);
+  }
+
+  .btn:focus-visible,
+  .input:focus-visible,
+  .select:focus-visible,
+  .textarea:focus-visible {
+    outline: none;
+    box-shadow: var(--ms-focus-ring);
   }
 
   .btn-primary {
-    @apply btn bg-red-600 text-white hover:bg-red-700 shadow-sm shadow-red-600/20;
+    @apply btn text-white shadow-sm;
+    background-color: rgb(var(--ms-color-brand));
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background-color: rgb(var(--ms-color-brand-hover));
   }
 
   .btn-secondary {
-    @apply btn bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700;
+    @apply btn;
+    background-color: rgb(var(--ms-color-surface-raised));
+    color: rgb(var(--ms-color-text));
+    border: 1px solid rgb(var(--ms-color-border));
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    border-color: rgb(var(--ms-color-border-strong));
+  }
+
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
   }
 
   .btn-ghost {
-    @apply btn text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800;
+    @apply btn;
+    color: rgb(var(--ms-color-text-muted));
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background-color: rgb(var(--ms-color-surface-raised));
   }
 
   .btn-danger {
@@ -75,15 +158,74 @@
   }
 
   .input {
-    @apply w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 transition-all;
+    @apply w-full px-3 py-2 border text-sm transition-colors;
+    border-radius: var(--ms-radius-control);
+    border-color: rgb(var(--ms-color-border-strong));
+    background-color: rgb(var(--ms-color-surface));
+    color: rgb(var(--ms-color-text));
+  }
+
+  .input::placeholder {
+    color: rgb(var(--ms-color-text-subtle));
+  }
+
+  .input:focus {
+    border-color: rgb(var(--ms-color-brand));
+    outline: none;
+  }
+
+  .input:disabled,
+  .select:disabled,
+  .textarea:disabled {
+    @apply cursor-not-allowed opacity-60;
+    background-color: rgb(var(--ms-color-canvas));
+  }
+
+  .select,
+  .textarea {
+    @apply input;
   }
 
   .label {
-    @apply block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wide;
+    @apply mb-1.5 block text-xs font-semibold tracking-wide;
+    color: rgb(var(--ms-color-text-muted));
   }
 
   .badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium;
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge;
+    background-color: rgb(var(--ms-color-success-subtle));
+    color: rgb(var(--ms-color-success));
+  }
+
+  .badge-warning {
+    @apply badge;
+    background-color: rgb(var(--ms-color-warning-subtle));
+    color: rgb(var(--ms-color-warning));
+  }
+
+  .badge-danger {
+    @apply badge;
+    background-color: rgb(var(--ms-color-danger-subtle));
+    color: rgb(var(--ms-color-danger));
+  }
+
+  .badge-info {
+    @apply badge;
+    background-color: rgb(var(--ms-color-info-subtle));
+    color: rgb(var(--ms-color-info));
+  }
+
+  .table-row {
+    border-bottom: 1px solid rgb(var(--ms-color-border));
+    transition: background-color 150ms ease;
+  }
+
+  .table-row:hover {
+    background-color: rgb(var(--ms-color-canvas));
   }
 }
 

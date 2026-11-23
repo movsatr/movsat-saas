@@ -3,9 +3,9 @@ import { useState, useEffect, useCallback } from 'react';
 type Theme = 'light' | 'dark';
 
 function getInitial(): Theme {
-  if (typeof localStorage !== 'undefined') {
-    const stored = localStorage.getItem('movsat-theme') as Theme | null;
-    if (stored) return stored;
+  if (typeof window !== 'undefined') {
+    const stored = window.localStorage.getItem('movsat-theme');
+    if (stored === 'light' || stored === 'dark') return stored;
   }
   if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
     return 'dark';
@@ -18,7 +18,8 @@ export function useTheme() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('movsat-theme', theme);
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('movsat-theme', theme);
   }, [theme]);
 
   const toggle = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), []);
