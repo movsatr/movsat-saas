@@ -12,49 +12,6 @@ const COLORS = {
   cyan: '#06b6d4',
 };
 
-// ============ Bar Chart ============
-export function BarChart({
-  data, height = 200, color = 'blue', valueFormat,
-}: {
-  data: { label: string; value: number }[];
-  height?: number;
-  color?: keyof typeof COLORS;
-  valueFormat?: (v: number) => string;
-}) {
-  if (data.length === 0) return <EmptyChart />;
-  const maxVal = Math.max(...data.map((d) => d.value), 1);
-  const colorHex = COLORS[color];
-
-  return (
-    <div className="w-full" style={{ height }}>
-      <div className="flex items-end justify-between gap-1 h-full pb-6 relative">
-        {data.map((d, i) => {
-          const h = (d.value / maxVal) * 100;
-          return (
-            <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
-              <div
-                className="w-full max-w-[48px] rounded-t-md transition-all duration-300 hover:opacity-80 relative"
-                style={{
-                  height: `${h}%`,
-                  backgroundColor: colorHex,
-                  minHeight: d.value > 0 ? '4px' : '0',
-                }}
-              >
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] font-medium text-slate-700 dark:text-slate-200 whitespace-nowrap bg-white dark:bg-slate-800 px-1.5 py-0.5 rounded shadow-sm z-10">
-                  {valueFormat ? valueFormat(d.value) : d.value}
-                </div>
-              </div>
-              <div className="absolute bottom-0 translate-y-full pt-1 text-[10px] text-slate-500 dark:text-slate-400 truncate w-full text-center">
-                {d.label}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ============ Grouped Bar Chart ============
 export function GroupedBarChart({
   data, height = 220, series,
