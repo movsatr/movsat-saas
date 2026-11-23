@@ -10,7 +10,7 @@ import {
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from '@/lib/supabase';
-import type { Profile, Role } from '@/types';
+import type { Profile } from '@/types';
 import { friendlyAuthError } from '@/lib/errors';
 
 interface AuthState {
@@ -309,13 +309,4 @@ export function useAuth() {
   }
 
   return ctx;
-}
-
-export function hasAccess(
-  role: Role | null,
-  allowed: Role[]
-): boolean {
-  if (!role) return false;
-
-  return allowed.includes(role);
 }
