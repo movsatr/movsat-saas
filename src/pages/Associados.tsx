@@ -17,8 +17,8 @@ export function Associados() {
   const { profile } = useAuth();
   const role = profile?.role;
   const canCreate = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
-  const canEdit = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
-  const canDelete = role === 'operador' || role === 'diretoria' || role === 'administrador';
+  const canEdit = role === 'supervisor' || role === 'diretoria' || role === 'administrador';
+  const canDelete = role === 'diretoria' || role === 'administrador';
   const canSeeFinancial = role === 'diretoria' || role === 'administrador';
 
   const [data, setData] = useState<AssociadoWithRelations[]>([]);
@@ -30,6 +30,7 @@ export function Associados() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Associado | null>(null);
   const [form, setForm] = useState<Partial<Associado>>({});
+  const canChangeForm = creating ? canCreate : canEdit;
   const mountedRef = useRef(true);
 
   const [atlasContracts, setAtlasContracts] = useState<Record<string, unknown>[]>([]);
@@ -283,8 +284,49 @@ export function Associados() {
   };
 
   const handleSave = async () => {
-    if (!form.nome?.trim()) { toast.error('Nome é obrigatório'); return; }
-    const payload: Record<string, unknown> = { ...form };
+    if (editing && !canEdit) {
+      toast.error('Seu perfil não pode editar associados');
+      return;
+    }
+    if (creating && !canCreate) {
+      toast.error('Seu perfil não pode criar associados');
+      return;
+    }
+
+    const nome = form.nome?.trim() ?? '';
+    if (!nome) {
+      toast.error('Nome é obrigatório');
+      return;
+    }
+
+    const cpfCnpj = form.cpf_cnpj?.trim() ?? '';
+    if (cpfCnpj) {
+      const digits = cpfCnpj.replace(/\D/g, '');
+      if (digits.length !== 11 && digits.length !== 14) {
+        toast.error('CPF/CNPJ inválido');
+        return;
+      }
+    }
+
+    const email = form.email?.trim() ?? '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('E-mail inválido');
+      return;
+    }
+
+    const mensalidade = Number(form.valor_mensalidade ?? 0);
+    if (!Number.isFinite(mensalidade) || mensalidade < 0) {
+      toast.error('Mensalidade inválida');
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      ...form,
+      nome,
+      cpf_cnpj: cpfCnpj || null,
+      email: email || null,
+      valor_mensalidade: mensalidade,
+    };
     delete payload.id;
     delete payload.created_at;
     delete payload.updated_at;
@@ -302,6 +344,11 @@ export function Associados() {
   };
 
   const handleDelete = async () => {
+    if (!canDelete) {
+      toast.error('Seu perfil não pode excluir associados');
+      setDeleteTarget(null);
+      return;
+    }
     if (!deleteTarget) return;
     const { error } = await supabase.from('associados').delete().eq('id', deleteTarget.id);
     if (error) { toast.error(friendlyError(error, 'associados')); return; }
@@ -584,47 +631,47 @@ export function Associados() {
         footer={
           <>
             <Button variant="secondary" onClick={closeDrawer}>Cancelar</Button>
-            {canEdit && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
+            {canChangeForm && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
           </>
         }
       >
         <div className="space-y-4">
           <div>
             <label className="label">Nome *</label>
-            <input className="input" disabled={!canEdit} value={form.nome ?? ''} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome do associado" />
+            <input className="input" disabled={!canChangeForm} value={form.nome ?? ''} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome do associado" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">CPF/CNPJ</label>
-              <input className="input" disabled={!canEdit} value={form.cpf_cnpj ?? ''} onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} placeholder="000.000.000-00" />
+              <input className="input" disabled={!canChangeForm} value={form.cpf_cnpj ?? ''} onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} placeholder="000.000.000-00" />
             </div>
             <div>
               <label className="label">Telefone</label>
-              <input className="input" disabled={!canEdit} value={form.telefone ?? ''} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(77) 99999-9999" />
+              <input className="input" disabled={!canChangeForm} value={form.telefone ?? ''} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(77) 99999-9999" />
             </div>
           </div>
           <div>
             <label className="label">E-mail</label>
-            <input className="input" type="email" disabled={!canEdit} value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@exemplo.com" />
+            <input className="input" type="email" disabled={!canChangeForm} value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@exemplo.com" />
           </div>
           <div>
             <label className="label">Endereço</label>
-            <input className="input" disabled={!canEdit} value={form.endereco ?? ''} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Rua, número, bairro" />
+            <input className="input" disabled={!canChangeForm} value={form.endereco ?? ''} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Rua, número, bairro" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Cidade</label>
-              <input className="input" disabled={!canEdit} value={form.cidade ?? ''} onChange={(e) => setForm({ ...form, cidade: e.target.value })} placeholder="Cidade" />
+              <input className="input" disabled={!canChangeForm} value={form.cidade ?? ''} onChange={(e) => setForm({ ...form, cidade: e.target.value })} placeholder="Cidade" />
             </div>
             <div>
               <label className="label">Estado</label>
-              <input className="input" disabled={!canEdit} value={form.estado ?? ''} onChange={(e) => setForm({ ...form, estado: e.target.value })} placeholder="UF" />
+              <input className="input" disabled={!canChangeForm} value={form.estado ?? ''} onChange={(e) => setForm({ ...form, estado: e.target.value })} placeholder="UF" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Plano</label>
-              <select className="input" disabled={!canEdit} value={form.plano ?? 'Basico'} onChange={(e) => setForm({ ...form, plano: e.target.value })}>
+              <select className="input" disabled={!canChangeForm} value={form.plano ?? 'Basico'} onChange={(e) => setForm({ ...form, plano: e.target.value })}>
                 <option value="Basico">Básico</option>
                 <option value="Intermediario">Intermediário</option>
                 <option value="Premium">Premium</option>
@@ -634,14 +681,14 @@ export function Associados() {
             {canSeeFinancial && (
               <div>
                 <label className="label">Mensalidade (R$)</label>
-                <input className="input" type="number" step="0.01" disabled={!canEdit} value={form.valor_mensalidade ?? 0} onChange={(e) => setForm({ ...form, valor_mensalidade: e.target.value === '' ? 0 : Number(e.target.value) })} />
+                <input className="input" type="number" min="0" step="0.01" disabled={!canChangeForm} value={form.valor_mensalidade ?? 0} onChange={(e) => setForm({ ...form, valor_mensalidade: e.target.value === '' ? 0 : Number(e.target.value) })} />
               </div>
             )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Status Pagamento</label>
-              <select className="input" disabled={!canEdit} value={form.status_pagamento ?? 'em_dia'} onChange={(e) => setForm({ ...form, status_pagamento: e.target.value as Associado['status_pagamento'] })}>
+              <select className="input" disabled={!canChangeForm} value={form.status_pagamento ?? 'em_dia'} onChange={(e) => setForm({ ...form, status_pagamento: e.target.value as Associado['status_pagamento'] })}>
                 <option value="em_dia">Em dia</option>
                 <option value="atrasado">Atrasado</option>
                 <option value="inadimplente">Inadimplente</option>
@@ -649,7 +696,7 @@ export function Associados() {
             </div>
             <div>
               <label className="label">Status Equipamento</label>
-              <select className="input" disabled={!canEdit} value={form.status_equipamento ?? 'sem_equipamento'} onChange={(e) => setForm({ ...form, status_equipamento: e.target.value as Associado['status_equipamento'] })}>
+              <select className="input" disabled={!canChangeForm} value={form.status_equipamento ?? 'sem_equipamento'} onChange={(e) => setForm({ ...form, status_equipamento: e.target.value as Associado['status_equipamento'] })}>
                 <option value="ok">OK</option>
                 <option value="com_problema">Com problema</option>
                 <option value="sem_equipamento">Sem equipamento</option>
@@ -658,7 +705,7 @@ export function Associados() {
           </div>
           <div>
             <label className="label">Observações</label>
-            <textarea className="input" rows={3} disabled={!canEdit} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas internas" />
+            <textarea className="input" rows={3} disabled={!canChangeForm} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas internas" />
           </div>
         </div>
       </CaseView>
