@@ -5,12 +5,8 @@ export interface SupervisorData {
   overdueOS: (OrdemServico & { associado_nome?: string })[];
   offlineTrackers: (RastreadorWithVeiculo & { associado_nome?: string })[];
   riskCustomers: Associado[];
-  d7Customers: Associado[];
-  d15Customers: Associado[];
-  d30Customers: Associado[];
   lowStock: EstoqueItem[];
   installationsToday: OrdemServico[];
-  recoveryOpportunities: (FinanceiroRecord & { associado_nome?: string })[];
   highPriorityAlerts: EventLog[];
   tasksToday: Task[];
   revenueAtRisk: number;
@@ -22,12 +18,11 @@ function daysSince(date: string): number {
 }
 
 export async function loadSupervisorData(): Promise<SupervisorData> {
-  const [osRes, trackerRes, custRes, stockRes, finRes, eventsRes, tasksRes] = await Promise.all([
+  const [osRes, trackerRes, custRes, stockRes, eventsRes, tasksRes] = await Promise.all([
     supabase.from('ordens_servico').select('*, associado:associados!inner(nome)').in('status', ['aberta', 'em_andamento']).order('data_abertura', { ascending: true }),
     supabase.from('rastreadores').select('*, associado:associados!inner(nome), veiculo:veiculos(placa,modelo)').in('status', ['com_problema', 'inativo']),
     supabase.from('associados').select('*'),
     supabase.from('estoque').select('*'),
-    supabase.from('financeiro').select('*, associado:associados!inner(nome)').in('status', ['pendente', 'atrasado']),
     supabase.from('events').select('*').order('created_at', { ascending: false }).limit(20),
     supabase.from('tasks').select('*').order('deadline', { ascending: true }),
   ]);
@@ -44,31 +39,11 @@ export async function loadSupervisorData(): Promise<SupervisorData> {
   const customers = (custRes.data || []) as Associado[];
   const riskCustomers = customers.filter((c) => c.status_pagamento === 'inadimplente' || c.status_equipamento === 'com_problema');
 
-  const d7: Associado[] = [];
-  const d15: Associado[] = [];
-  const d30: Associado[] = [];
-  customers.forEach((c) => {
-    if (c.status_pagamento === 'atrasado' || c.status_pagamento === 'inadimplente') {
-      const fin = (finRes.data || []) as unknown as (FinanceiroRecord & { associado: { nome: string } })[];
-      const custFin = fin.filter((f) => f.associado_id === c.id);
-      const maxDays = Math.max(0, ...custFin.map((f) => f.data_vencimento ? daysSince(f.data_vencimento) : 0));
-      if (maxDays >= 30) d30.push(c);
-      else if (maxDays >= 15) d15.push(c);
-      else if (maxDays >= 7) d7.push(c);
-    }
-  });
-
   const lowStock = ((stockRes.data || []) as EstoqueItem[]).filter((e) => e.quantidade <= e.quantidade_minima);
 
   const allOSForInst = (osRes.data || []) as unknown as (OrdemServico & { associado: { nome: string } })[];
   const today = new Date().toISOString().slice(0, 10);
   const installationsToday = allOSForInst.filter((o) => o.tipo === 'instalacao' && o.data_abertura === today);
-
-  const allFin = (finRes.data || []) as unknown as (FinanceiroRecord & { associado: { nome: string } })[];
-  const recoveryOpportunities = allFin
-    .filter((f) => f.status === 'atrasado')
-    .map((f) => ({ ...f, associado_nome: f.associado?.nome }))
-    .sort((a, b) => Number(b.valor) - Number(a.valor));
 
   const highPriorityAlerts = ((eventsRes.data || []) as EventLog[]).filter((e) => e.severity === 'critical');
 
@@ -84,12 +59,8 @@ export async function loadSupervisorData(): Promise<SupervisorData> {
     overdueOS,
     offlineTrackers,
     riskCustomers,
-    d7Customers: d7,
-    d15Customers: d15,
-    d30Customers: d30,
     lowStock,
     installationsToday,
-    recoveryOpportunities,
     highPriorityAlerts,
     tasksToday,
     revenueAtRisk,
@@ -104,7 +75,6 @@ export interface DiretoriaKPIs {
   churnRate: number;
   activeCustomers: number;
   activeVehicles: number;
-  avgTicket: number;
   growthVsLastMonth: number;
   recoveryRate: number;
   totalCustomers: number;
@@ -114,7 +84,6 @@ export interface DiretoriaKPIs {
   revenueRecovered: number;
   cac: number;
   ltv: number;
-  monthlyGrowth: number;
   yearlyGrowth: number;
   customersAtRisk: number;
   goals: { mrrTarget: number; churnTarget: number; growthTarget: number };
@@ -156,9 +125,6 @@ export async function loadDiretoriaData(): Promise<{ kpis: DiretoriaKPIs; charts
   const revenueAtRisk = finance.filter((f) => f.status === 'atrasado').reduce((s, f) => s + Number(f.valor), 0);
 
   const churnRate = totalCustomers > 0 ? (customers.filter((c) => c.status_pagamento === 'inadimplente').length / totalCustomers) * 100 : 0;
-
-  const paidInvoices = finance.filter((f) => f.status === 'pago');
-  const avgTicket = paidInvoices.length > 0 ? revenueReceived / paidInvoices.length : 0;
 
   const recovered = finance.filter((f) => f.status === 'pago' && f.data_pagamento).length;
   const totalOverdue = finance.filter((f) => f.status === 'atrasado' || (f.status === 'pago' && f.data_pagamento)).length;
@@ -281,8 +247,6 @@ export async function loadDiretoriaData(): Promise<{ kpis: DiretoriaKPIs; charts
     ? avgMensalidade * 12 * (1 / churnRate)
     : avgMensalidade * 12 * 24;
 
-  const monthlyGrowth = growthVsLastMonth;
-
   const yearAgo = new Date();
   yearAgo.setFullYear(yearAgo.getFullYear() - 1);
   const mrrYearAgo = customers
@@ -318,10 +282,10 @@ export async function loadDiretoriaData(): Promise<{ kpis: DiretoriaKPIs; charts
   return {
     kpis: {
       mrr, revenueReceived, revenuePending, revenueAtRisk, churnRate,
-      activeCustomers, activeVehicles, avgTicket, growthVsLastMonth, recoveryRate,
+      activeCustomers, activeVehicles, growthVsLastMonth, recoveryRate,
       totalCustomers, totalVehicles,
       annualRevenue, revenueLost, revenueRecovered, cac, ltv,
-      monthlyGrowth, yearlyGrowth, customersAtRisk, goals,
+      yearlyGrowth, customersAtRisk, goals,
     },
     charts: {
       revenueEvolution, churnEvolution, customerGrowth,
