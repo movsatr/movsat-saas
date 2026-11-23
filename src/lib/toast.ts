@@ -57,5 +57,3 @@ export function useToasts() {
 
   return { toasts: currentToasts, push: pushToast, remove };
 }
-
-export type ToastPushFn = (type: ToastType, message: string) => void;
