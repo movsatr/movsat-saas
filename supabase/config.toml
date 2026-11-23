@@ -23,3 +23,7 @@ entrypoint = "./functions/create-user/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/softruck-v5-api/index.ts"
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
