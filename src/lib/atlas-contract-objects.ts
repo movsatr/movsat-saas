@@ -349,6 +349,7 @@ export interface ActiveProductScanResult {
 
 export async function fetchActiveObjectProductCatalog(
   query: AtlasQuery,
+  onProgress?: (progress: { page: number; pagesTotal: number | null; objectsScanned: number; totalActiveObjects: number | null }) => void,
 ): Promise<ActiveProductScanResult> {
   const aggregate = new Map<string, ActiveProductAggregate>();
   let page = 1;
@@ -358,11 +359,12 @@ export async function fetchActiveObjectProductCatalog(
   let productRowsScanned = 0;
   let pagesScanned = 0;
 
-  while (page <= 200) {
+  const pageSize = 50;
+  while (page <= 300) {
     const payload = await query({
       resource: 'active_product_scan',
       page: String(page),
-      page_size: '100',
+      page_size: String(pageSize),
     });
     if (!isRecord(payload)) throw new Error('Resposta inválida na varredura de produtos ativos.');
     const pageTotal = payload.totalActiveObjects == null ? null : Number(payload.totalActiveObjects);
@@ -387,6 +389,12 @@ export async function fetchActiveObjectProductCatalog(
     failedObjects += pageFailed;
     productRowsScanned += pageRows;
     pagesScanned++;
+    onProgress?.({
+      page,
+      pagesTotal: totalActiveObjects === null ? null : Math.ceil(totalActiveObjects / pageSize),
+      objectsScanned,
+      totalActiveObjects,
+    });
 
     if (!Array.isArray(payload.products)) throw new Error('A Mutual Tech não retornou o catálogo de produtos da página.');
     for (const item of payload.products) {
@@ -423,7 +431,7 @@ export async function fetchActiveObjectProductCatalog(
     page++;
   }
 
-  throw new Error('A varredura ultrapassou 200 páginas e foi interrompida sem declarar conclusão.');
+  throw new Error('A varredura ultrapassou 300 páginas e foi interrompida sem declarar conclusão.');
 }
 
 export function compareWithLocal(
