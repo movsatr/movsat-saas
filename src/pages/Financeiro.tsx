@@ -75,7 +75,7 @@ function FinanceiroContent() {
     ]);
     if (finRes.error) toast.error(friendlyError(finRes.error, 'financeiro'));
     if (assocRes.error) toast.error(friendlyError(assocRes.error, 'associados'));
-    setData(((finRes.data || []) as FinanceiroWithAssoc[]).map((row) => ({ ...row, nome_associado: row.associado?.nome || 'Lançamento geral' })));
+    setData(((finRes.data || []) as FinanceiroWithAssoc[]).map((row) => ({ ...row, nome_associado: row.associado?.nome || 'Sem vínculo (registro legado)' })));
     setAssociados((assocRes.data || []) as Associado[]);
     setLoading(false);
   };
@@ -109,6 +109,7 @@ function FinanceiroContent() {
   };
 
   const handleSave = async () => {
+    if (!form.associado_id) { toast.error('Selecione um cliente/associado'); return; }
     if (!form.descricao?.trim()) { toast.error('Descrição é obrigatória'); return; }
     if (form.valor == null || Number(form.valor) <= 0 || !Number.isFinite(Number(form.valor))) { toast.error('Informe um valor válido maior que zero'); return; }
 
@@ -248,8 +249,8 @@ function FinanceiroContent() {
         <div className="space-y-4">
           <div>
             <label className="label">Cliente / associado</label>
-            <select className="input" disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value || null })}>
-              <option value="">Lançamento geral / sem vínculo</option>
+            <select className="input" required disabled={!canEdit} value={form.associado_id ?? ''} onChange={(e) => setForm({ ...form, associado_id: e.target.value || null })}>
+              <option value="" disabled>Selecione um cliente/associado</option>
               {associados.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </div>
