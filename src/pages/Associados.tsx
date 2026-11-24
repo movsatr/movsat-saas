@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
-import { compareWithLocal, fetchAllPages, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
+import { compareWithLocal, fetchActiveTrackerRecords, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
 const PAGE_SIZE = 50;
@@ -82,13 +82,20 @@ export function Associados() {
 
       let localUnassignedVehicles: Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }> = [];
       if (role === 'administrador' || role === 'diretoria') {
-        const { data: unassigned, error: unassignedError } = await supabase
-          .from('veiculos')
-          .select('id_externo, rastreador:rastreadores(id, imei, status)')
-          .is('associado_id', null)
-          .not('id_externo', 'is', null);
-        if (unassignedError) throw unassignedError;
-        localUnassignedVehicles = (unassigned ?? []) as typeof localUnassignedVehicles;
+        let vehicleOffset = 0;
+        while (true) {
+          const { data: unassignedPage, error: unassignedError } = await supabase
+            .from('veiculos')
+            .select('id_externo, rastreador:rastreadores(id, imei, status)')
+            .is('associado_id', null)
+            .not('id_externo', 'is', null)
+            .range(vehicleOffset, vehicleOffset + PAGE_SIZE - 1);
+          if (unassignedError) throw unassignedError;
+          const page = (unassignedPage ?? []) as unknown as typeof localUnassignedVehicles;
+          localUnassignedVehicles.push(...page);
+          if (page.length < PAGE_SIZE) break;
+          vehicleOffset += PAGE_SIZE;
+        }
       }
 
       if (mountedRef.current) {
@@ -136,10 +143,12 @@ export function Associados() {
         return payload.data;
       };
 
-      const softruckObjects = await fetchAllPages(atlasGet, { resource: 'softruck_contract_objects' });
-      const fields = [...new Set(softruckObjects.flatMap((row) => Object.keys(row)))].sort();
-      setSoftruckDiagnostic({ count: softruckObjects.length, fields });
-      setAtlasContracts([]);
+      const activeTrackers = await fetchActiveTrackerRecords(atlasGet);
+      setAtlasContracts(activeTrackers);
+      setSoftruckDiagnostic({
+        count: activeTrackers.length,
+        fields: ['person.id', 'vehicle.id', 'vehicle.externalId', 'contract.id', 'product.id', 'product.name'],
+      });
       setAtlasLastRefresh(new Date().toISOString());
     } catch (error) {
       setAtlasContracts([]);
@@ -308,14 +317,14 @@ export function Associados() {
                 <Badge color="slate">origem dos dados</Badge>
                 <Badge color="blue">somente leitura</Badge>
               </div>
-              <p className="mt-1 text-sm text-slate-500">Consulta somente leitura da rota Softruck da Mutual Tech. Primeiro validamos o retorno real e seus campos; só depois definiremos a regra de elegibilidade.</p>
+              <p className="mt-1 text-sm text-slate-500">Consulta somente leitura à rota Softruck e aos vínculos de produto/veículo da Mutual Tech. Exibe apenas contratos ativos com produto rastreador ativado e relacionamentos confirmados por ID.</p>
             </div>
             <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
           </div>
           {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando todas as páginas da rota Softruck da Mutual Tech…</p>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
-          {softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rota Softruck respondida: {softruckDiagnostic.count} registros.</p><p className="mt-1 text-xs text-slate-500">Campos retornados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">Esta etapa não classifica rastreadores como ativos; a regra será aplicada somente após validar os campos da resposta real.</p></div>}
+          {softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p></div>}
           {atlasContracts.length > 0 && <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
