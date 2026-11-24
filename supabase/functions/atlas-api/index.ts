@@ -29,7 +29,7 @@ const RESOURCES: Record<string, { path: string; params: string[] }> = {
   },
   integrations_contract_objects: {
     path: "/integrations/contract_objects/",
-    params: ["id", "contract_id", "vehicle_id", "object_type", "contract_status", "implemento_id", "vehicle_chassi", "vehicle_renavam", "vehicle_plate", "person_id", "person_cpf_cnpj", "page", "page_size", "supplier_id"],
+    params: ["id", "contract_id", "vehicle_id", "object_type", "contract_status", "implemento_id", "vehicle_chassi", "vehicle_renavam", "vehicle_plate", "person_id", "person_cpf_cnpj", "page", "page_size"],
   },
   softruck_contract_objects: {
     path: "/softruck/contract_objects/",
@@ -164,6 +164,13 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const integrationSupplierId = resourceName === "integrations_contract_objects"
+      ? Deno.env.get("ATLAS_INTEGRATION_SUPPLIER_ID")
+      : null;
+    if (resourceName === "integrations_contract_objects" && !integrationSupplierId) {
+      return jsonResponse(req, 500, { error: "integration_supplier_not_configured" });
+    }
+
     const upstreamUrl = new URL(
       `https://atlas-api.mutualignit.com.br/public_api/v2${resource.path}`,
     );
@@ -172,6 +179,9 @@ Deno.serve(async (req: Request) => {
       for (const value of incomingUrl.searchParams.getAll(param)) {
         upstreamUrl.searchParams.append(param, value);
       }
+    }
+    if (integrationSupplierId) {
+      upstreamUrl.searchParams.set("supplier_id", integrationSupplierId);
     }
 
     let upstream: Response;
@@ -189,9 +199,7 @@ Deno.serve(async (req: Request) => {
       const isTimeout = err.name === "TimeoutError" || err.name === "AbortError";
       console.error("Atlas upstream fetch failed", JSON.stringify({
         resource: resourceName,
-        path: resource.path,
         errorName: err.name,
-        errorMessage: err.message,
         isTimeout,
       }));
       return jsonResponse(req, 502, {
@@ -201,15 +209,12 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!upstream.ok) {
-      const upstreamErrorBody = (await upstream.clone().text()).slice(0, 800);
       console.error("Falha na API Atlas", JSON.stringify({
         resource: resourceName,
-        path: resource.path,
         status: upstream.status,
-        responseBody: upstreamErrorBody,
       }));
       return jsonResponse(req, 502, {
-        error: `atlas_request_failed (HTTP ${upstream.status}): ${upstreamErrorBody || "sem detalhe retornado"}`,
+        error: "atlas_request_failed",
         atlas_status: upstream.status,
       });
     }
@@ -223,30 +228,13 @@ Deno.serve(async (req: Request) => {
 
     try {
       const data = JSON.parse(body);
-      if (resourceName === "softruck_contract_objects") {
-        const obj = data && typeof data === "object" ? data as Record<string, unknown> : null;
-        const nested = obj?.data && typeof obj.data === "object" ? obj.data as Record<string, unknown> : null;
-        const rows = Array.isArray(data) ? data : Array.isArray(obj?.results) ? obj.results : Array.isArray(nested?.results) ? nested.results : Array.isArray(nested?.data) ? nested.data : [];
-        console.log("Atlas Softruck diagnostic", JSON.stringify({
-          topLevelType: Array.isArray(data) ? "array" : typeof data,
-          topLevelKeys: obj ? Object.keys(obj) : [],
-          nestedKeys: nested ? Object.keys(nested) : [],
-          count: obj?.count ?? nested?.count ?? obj?.total ?? nested?.total ?? null,
-          rowCount: rows.length,
-          firstRowKeys: rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0] as Record<string, unknown>) : [],
-        }));
-      }
       return jsonResponse(req, 200, { ok: true, resource: resourceName, data });
     } catch {
       return jsonResponse(req, 502, { error: "atlas_invalid_json" });
     }
   } catch (error) {
     const err = error instanceof Error ? error : new Error("Erro desconhecido");
-    console.error("Falha inesperada na função Atlas", JSON.stringify({
-      name: err.name,
-      message: err.message,
-      stack: err.stack,
-    }));
+    console.error("Falha inesperada na função Atlas", err.name);
     return jsonResponse(req, 502, { error: "atlas_unavailable" });
   }
 });
