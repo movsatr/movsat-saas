@@ -342,6 +342,11 @@ Deno.serve(async (req: Request) => {
                 ...(firstProduct ? ["activated", "deleted", "status", "product_name", "subproduct_description", "subproduct_supplier_code"]
                   .filter((key) => firstProduct[key] !== undefined)
                   .map((key) => `${key}=${typeof firstProduct[key] === "string" || typeof firstProduct[key] === "boolean" || typeof firstProduct[key] === "number" ? String(firstProduct[key]) : Array.isArray(firstProduct[key]) ? "array" : typeof firstProduct[key]}`) : []),
+                ...[...new Set(products.map((item) =>
+                  item && typeof item === "object" && !Array.isArray(item) &&
+                  typeof (item as Record<string, unknown>).product_name === "string"
+                    ? String((item as Record<string, unknown>).product_name) : ""
+                ).filter(Boolean))].map((name) => `catalog_product_name=${name}`),
               ],
             });
           } catch (error) {
