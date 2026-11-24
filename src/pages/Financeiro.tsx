@@ -160,7 +160,7 @@ function FinanceiroContent() {
   });
 
   const columns: Column<FinanceiroWithAssoc>[] = [
-    { key: 'associado', header: 'Associado', sortable: true, sortValue: (r) => r.associado?.nome ?? '', render: (r) => <span className="font-medium text-slate-900 dark:text-white">{r.associado?.nome || r.nome_associado || 'Lançamento geral'}</span> },
+    { key: 'associado', header: 'Associado', sortable: true, sortValue: (r) => r.associado?.nome ?? '', render: (r) => <span className="font-medium text-slate-900 dark:text-white">{r.associado?.nome || r.nome_associado || 'Sem vínculo (registro legado)'}</span> },
     { key: 'tipo', header: 'Tipo', sortable: true, render: (r) => <span className="text-xs">{tipoLabels[r.tipo]}</span> },
     { key: 'descricao', header: 'Descrição', render: (r) => r.descricao },
     { key: 'valor', header: 'Valor', sortable: true, sortValue: (r) => Number(r.valor), render: (r) => <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(r.valor)}</span> },
