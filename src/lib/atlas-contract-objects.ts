@@ -67,7 +67,7 @@ function parsePage(payload: unknown): PageResult {
   }
 
   const nextValue = root?.next ?? nested?.next;
-  const next = nextValue === undefined ? null : nextValue !== null && nextValue !== '';
+  const next = nextValue === undefined ? null : nextValue !== false && nextValue !== null && nextValue !== '';
   return { rows, count, next };
 }
 
@@ -184,7 +184,7 @@ function mergeActiveTrackerRecords(
   productRows: AtlasRecord[],
   vehicleRows: AtlasRecord[],
 ): ActiveTrackerRecord[] {
-  const uniqueObjects = uniqueById(objects, (row) => valueId(row.id), ['contract_data', 'person_data']);
+  const uniqueObjects = uniqueById(objects, (row) => valueId(row.id), ['contract_data.id', 'person_data.id']);
   const uniqueProducts = uniqueById(productRows, (row) => valueId(row.id), [
     'contract_id', 'contract_object_id', 'product_id', 'activated', 'deleted',
   ]);
@@ -298,7 +298,7 @@ function mergeActiveTrackerRecords(
 }
 
 export async function fetchActiveTrackerRecords(query: AtlasQuery): Promise<ActiveTrackerRecord[]> {
-  const objects = await fetchAllPages(query, { resource: 'integrations_contract_objects' });
+  const objects = await fetchAllPages(query, { resource: 'softruck_contract_objects' });
   const contractIds = [...new Set(objects.map((row) => {
     const contractData = isRecord(row.contract_data) ? row.contract_data : null;
     const vehicleData = isRecord(row.vehicle_data) ? row.vehicle_data : null;
@@ -336,7 +336,7 @@ export function compareWithLocal(
       id_externo?: string | null;
       associado_id?: string | null;
       rastreador_id?: string | null;
-      rastreador?: { id: string; imei: string; status: string } | null;
+      rastreador?: { id: string; imei: string; status: string } | { id: string; imei: string; status: string }[] | null;
     }>;
   }>,
   unassignedVehicles: Array<{
@@ -368,7 +368,8 @@ export function compareWithLocal(
 
   const { associate, vehicle } = matches[0];
   if (!associate) {
-    return { status: 'unassigned', associateName: null, trackerStatus: vehicle.rastreador?.status ?? null, personMatches: null };
+    const tracker = Array.isArray(vehicle.rastreador) ? vehicle.rastreador[0] ?? null : vehicle.rastreador;
+    return { status: 'unassigned', associateName: null, trackerStatus: tracker?.status ?? null, personMatches: null };
   }
   const normalizeDocument = (value: string | null) => value?.replace(/\D/g, '') ?? '';
   const remoteDocument = normalizeDocument(record.person.cpfCnpj);
