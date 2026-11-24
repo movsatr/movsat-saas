@@ -448,7 +448,11 @@ Deno.serve(async (req: Request) => {
       let productRowsScanned = 0;
       let failedObjects = 0;
       let nextIndex = 0;
-      const workers = Array.from({ length: Math.min(4, objects.length) }, async () => {
+      let embeddedProductsUsed = 0;
+      let productEndpointRequests = 0;
+      // Aproveita produtos já embutidos no retorno nested e consulta o endpoint
+      // individual somente quando a API não entregar esse bloco.
+      const workers = Array.from({ length: Math.min(10, objects.length) }, async () => {
         while (true) {
           const index = nextIndex++;
           if (index >= objects.length) return;
@@ -456,12 +460,19 @@ Deno.serve(async (req: Request) => {
           const objectId = object.id == null ? "" : String(object.id);
           if (!objectId) { failedObjects++; continue; }
           try {
-            const productPayload = await requestAtlas("/contract/contract_object_product/", {
-              contract_object_id: objectId,
-              page: "1",
-              page_size: "100",
-            });
-            const productRows = extractRows(productPayload);
+            let productRows: Record<string, unknown>[];
+            if (Array.isArray(object.products_data)) {
+              embeddedProductsUsed++;
+              productRows = [{ products: object.products_data }];
+            } else {
+              productEndpointRequests++;
+              const productPayload = await requestAtlas("/contract/contract_object_product/", {
+                contract_object_id: objectId,
+                page: "1",
+                page_size: "100",
+              });
+              productRows = extractRows(productPayload);
+            }
             objectsScanned++;
             for (const row of productRows) {
               const nestedProducts = Array.isArray(row.products) ? row.products.filter((item) =>
@@ -504,6 +515,9 @@ Deno.serve(async (req: Request) => {
           objectsScanned,
           failedObjects,
           productRowsScanned,
+          embeddedProductsUsed,
+          productEndpointRequests,
+          effectiveConcurrency: Math.min(10, objects.length),
           products,
           pageComplete: failedObjects === 0 && objectsScanned === objects.length,
           hasMore: total === null ? objects.length === pageSize : page * pageSize < total,
