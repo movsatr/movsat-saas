@@ -150,7 +150,7 @@ export function Associados() {
       setProductScan(scan);
       setAtlasContracts([]);
       setSoftruckDiagnostic(null);
-      setAtlasLastRefresh(new Date().toISOString());
+      setAtlasLastRefresh(scan.complete ? new Date().toISOString() : null);
     } catch (error) {
       setAtlasContracts([]);
       setProductScan(null);
@@ -342,6 +342,7 @@ export function Associados() {
               <div><p className="text-xs text-slate-500">Páginas percorridas</p><p className="text-lg font-semibold">{productScan.pagesScanned.toLocaleString('pt-BR')}</p></div>
             </div>
             {productScan.failedObjects > 0 && <p className="mt-2 text-sm text-red-600">{productScan.failedObjects} objetos tiveram falha na consulta. O resultado não pode ser considerado conclusivo.</p>}
+            {productScan.countChangedDuringScan && <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">A Mutual alterou a contagem durante a consulta (inicial: {productScan.totalActiveObjects?.toLocaleString('pt-BR') ?? '—'}; última leitura: {productScan.latestReportedTotal?.toLocaleString('pt-BR') ?? '—'}). Os dados foram preservados, mas esta execução não será marcada como conclusiva.</p>}
             <div className="mt-4 overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead><tr className="border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700"><th className="py-2 pr-3">ID produto</th><th className="py-2 pr-3">Produto / descrição</th><th className="py-2 pr-3">Código fornecedor</th><th className="py-2 pr-3">Vínculos</th><th className="py-2 pr-3">Ativados</th><th className="py-2">Excluídos</th></tr></thead>
