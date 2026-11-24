@@ -347,6 +347,12 @@ Deno.serve(async (req: Request) => {
                   typeof (item as Record<string, unknown>).product_name === "string"
                     ? String((item as Record<string, unknown>).product_name) : ""
                 ).filter(Boolean))].map((name) => `catalog_product_name=${name}`),
+                ...products.flatMap((item) => {
+                  if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+                  const product = item as Record<string, unknown>;
+                  return typeof product.product_id === "string" || typeof product.product_id === "number"
+                    ? [`catalog_product=${String(product.product_id)}:${String(product.product_name ?? "sem nome")}`] : [];
+                }),
               ],
             });
           } catch (error) {
