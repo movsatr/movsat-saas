@@ -213,6 +213,10 @@ Deno.serve(async (req: Request) => {
         }
       };
 
+      const diagnostics = await Promise.all(targets.map((target) =>
+        summarize(target.name, target.path)
+      ));
+
       const activeStatusProbes = await Promise.all([
         summarize("contract_object_nested?contract_status=ATIVO", "/contract/contract_object/nested/", { contract_status: "ATIVO" }),
         summarize("contract_object_nested?status=ATIVO", "/contract/contract_object/nested/", { status: "ATIVO" }),
@@ -434,7 +438,7 @@ Deno.serve(async (req: Request) => {
     }
   } catch (error) {
     const err = error instanceof Error ? error : new Error("Erro desconhecido");
-    console.error("Falha inesperada na função Atlas", err.name);
+    console.error("Falha inesperada na função Atlas", err.name, err.message);
     return jsonResponse(req, 502, { error: "atlas_unavailable" });
   }
 });
