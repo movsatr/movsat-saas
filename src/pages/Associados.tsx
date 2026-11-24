@@ -39,7 +39,7 @@ export function Associados() {
   const [atlasLoading, setAtlasLoading] = useState(false);
   const [atlasError, setAtlasError] = useState<string | null>(null);
   const [atlasLastRefresh, setAtlasLastRefresh] = useState<string | null>(null);
-  const [softruckDiagnostic, setSoftruckDiagnostic] = useState<{ count: number; fields: string[] } | null>(null);
+  const [softruckDiagnostic, setSoftruckDiagnostic] = useState<{ count: number; fields: string[]; routes?: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }> } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -144,10 +144,18 @@ export function Associados() {
       };
 
       const activeTrackers = await fetchActiveTrackerRecords(atlasGet);
+      let routeDiagnostics: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }> = [];
+      if (activeTrackers.length === 0) {
+        const diagnosticPayload = await atlasGet({ resource: 'diagnostics' }) as {
+          diagnostics?: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }>;
+        };
+        routeDiagnostics = diagnosticPayload.diagnostics ?? [];
+      }
       setAtlasContracts(activeTrackers);
       setSoftruckDiagnostic({
         count: activeTrackers.length,
         fields: ['person.id', 'vehicle.id', 'vehicle.externalId', 'contract.id', 'product.id', 'product.name'],
+        routes: routeDiagnostics,
       });
       setAtlasLastRefresh(new Date().toISOString());
     } catch (error) {
@@ -324,7 +332,7 @@ export function Associados() {
           {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando todas as páginas da rota Softruck da Mutual Tech…</p>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
-          {softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p></div>}
+          {softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p>{softruckDiagnostic.routes && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="font-medium">Diagnóstico das rotas (somente contagens e nomes de campos)</p>{softruckDiagnostic.routes.map((route) => <div key={route.resource} className="text-xs text-slate-500"><span className="font-medium text-slate-700 dark:text-slate-300">{route.resource}</span>: HTTP {route.httpStatus} · total {route.count ?? 'não informado'} · página {route.pageRows ?? '—'} registros{route.sampleFields.length ? ` · campos: ${route.sampleFields.join(', ')}` : ''}</div>)}</div>}</div>}
           {atlasContracts.length > 0 && <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
