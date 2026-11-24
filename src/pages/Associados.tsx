@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
-import { compareWithLocal, fetchActiveTrackerRecords, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
+import { fetchActiveObjectProductCatalog, type ActiveProductScanResult, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
 const PAGE_SIZE = 50;
@@ -36,6 +36,7 @@ export function Associados() {
   const mountedRef = useRef(true);
 
   const [atlasContracts, setAtlasContracts] = useState<ActiveTrackerRecord[]>([]);
+  const [productScan, setProductScan] = useState<ActiveProductScanResult | null>(null);
   const [atlasLoading, setAtlasLoading] = useState(false);
   const [atlasError, setAtlasError] = useState<string | null>(null);
   const [atlasLastRefresh, setAtlasLastRefresh] = useState<string | null>(null);
@@ -143,23 +144,14 @@ export function Associados() {
         return payload.data;
       };
 
-      const activeTrackers = await fetchActiveTrackerRecords(atlasGet);
-      let routeDiagnostics: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }> = [];
-      if (activeTrackers.length === 0) {
-        const diagnosticPayload = await atlasGet({ resource: 'diagnostics' }) as {
-          diagnostics?: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }>;
-        };
-        routeDiagnostics = diagnosticPayload.diagnostics ?? [];
-      }
-      setAtlasContracts(activeTrackers);
-      setSoftruckDiagnostic({
-        count: activeTrackers.length,
-        fields: ['person.id', 'vehicle.id', 'vehicle.externalId', 'contract.id', 'product.id', 'product.name'],
-        routes: routeDiagnostics,
-      });
+      const scan = await fetchActiveObjectProductCatalog(atlasGet);
+      setProductScan(scan);
+      setAtlasContracts([]);
+      setSoftruckDiagnostic(null);
       setAtlasLastRefresh(new Date().toISOString());
     } catch (error) {
       setAtlasContracts([]);
+      setProductScan(null);
       setSoftruckDiagnostic(null);
       setAtlasLastRefresh(null);
       const msg = error instanceof Error ? error.message : 'Falha ao consultar os rastreadores ativos da Mutual Tech.';
@@ -325,14 +317,41 @@ export function Associados() {
                 <Badge color="slate">origem dos dados</Badge>
                 <Badge color="blue">somente leitura</Badge>
               </div>
-              <p className="mt-1 text-sm text-slate-500">Consulta somente leitura à rota Softruck e aos vínculos de produto/veículo da Mutual Tech. Exibe apenas contratos ativos com produto rastreador ativado e relacionamentos confirmados por ID.</p>
+              <p className="mt-1 text-sm text-slate-500">Varredura somente leitura de todos os objetos e contratos ativos da Mutual Tech. Primeiro identifica e contabiliza os produtos vinculados; a confirmação de rastreador depende da validação posterior dos vínculos de veículo e titular.</p>
             </div>
             <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
           </div>
-          {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando todas as páginas da rota Softruck da Mutual Tech…</p>}
+          {atlasLoading && <p className="mb-3 text-sm text-slate-500">Percorrendo as páginas dos objetos ativos e consultando os produtos vinculados, com até 4 requisições simultâneas…</p>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
-          {softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p>{softruckDiagnostic.routes && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="font-medium">Diagnóstico das rotas (somente contagens e nomes de campos)</p>{softruckDiagnostic.routes.map((route) => <div key={route.resource} className="text-xs text-slate-500"><span className="font-medium text-slate-700 dark:text-slate-300">{route.resource}</span>: HTTP {route.httpStatus} · total {route.count ?? 'não informado'} · página {route.pageRows ?? '—'} registros{route.sampleFields.length ? ` · campos: ${route.sampleFields.join(', ')}` : ''}</div>)}</div>}</div>}
+          {productScan && <div className="mb-4 rounded-lg border border-slate-200 p-4 text-sm dark:border-slate-700">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-semibold">Varredura de produtos dos objetos ativos</p>
+              <Badge color={productScan.complete ? 'green' : 'amber'}>{productScan.complete ? 'Varredura completa' : 'Incompleta'}</Badge>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div><p className="text-xs text-slate-500">Objetos ativos na base</p><p className="text-lg font-semibold">{productScan.totalActiveObjects?.toLocaleString('pt-BR') ?? '—'}</p></div>
+              <div><p className="text-xs text-slate-500">Objetos consultados</p><p className="text-lg font-semibold">{productScan.objectsScanned.toLocaleString('pt-BR')}</p></div>
+              <div><p className="text-xs text-slate-500">Vínculos de produto</p><p className="text-lg font-semibold">{productScan.productRowsScanned.toLocaleString('pt-BR')}</p></div>
+              <div><p className="text-xs text-slate-500">Páginas percorridas</p><p className="text-lg font-semibold">{productScan.pagesScanned.toLocaleString('pt-BR')}</p></div>
+            </div>
+            {productScan.failedObjects > 0 && <p className="mt-2 text-sm text-red-600">{productScan.failedObjects} objetos tiveram falha na consulta. O resultado não pode ser considerado conclusivo.</p>}
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead><tr className="border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700"><th className="py-2 pr-3">ID produto</th><th className="py-2 pr-3">Produto / descrição</th><th className="py-2 pr-3">Código fornecedor</th><th className="py-2 pr-3">Vínculos</th><th className="py-2 pr-3">Ativados</th><th className="py-2">Excluídos</th></tr></thead>
+                <tbody>{productScan.products.map((product) => <tr key={[product.productId, product.name, product.description, product.supplierCode].join('|')} className="border-b border-slate-100 dark:border-slate-800">
+                  <td className="py-2 pr-3 font-mono">{product.productId}</td>
+                  <td className="py-2 pr-3"><span className="font-medium">{product.name}</span>{product.description && <span className="block text-xs text-slate-500">{product.description}</span>}</td>
+                  <td className="py-2 pr-3">{product.supplierCode || '—'}</td>
+                  <td className="py-2 pr-3 tabular-nums">{product.occurrences.toLocaleString('pt-BR')}</td>
+                  <td className="py-2 pr-3 tabular-nums">{product.activated.toLocaleString('pt-BR')}</td>
+                  <td className="py-2 tabular-nums">{product.deleted.toLocaleString('pt-BR')}</td>
+                </tr>)}
+                {productScan.products.length === 0 && <tr><td colSpan={6} className="py-5 text-center text-slate-500">Nenhum vínculo de produto retornado nas páginas consultadas.</td></tr>}</tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Esta etapa identifica o catálogo associado aos objetos ativos. Ela não declara quantidade de rastreadores: a confirmação exige cruzar os produtos identificados com ativação, veículo, contrato e titular.</p>
+          </div>}{softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p>{softruckDiagnostic.routes && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="font-medium">Diagnóstico das rotas (somente contagens e nomes de campos)</p>{softruckDiagnostic.routes.map((route) => <div key={route.resource} className="text-xs text-slate-500"><span className="font-medium text-slate-700 dark:text-slate-300">{route.resource}</span>: HTTP {route.httpStatus} · total {route.count ?? 'não informado'} · página {route.pageRows ?? '—'} registros{route.sampleFields.length ? ` · campos: ${route.sampleFields.join(', ')}` : ''}</div>)}</div>}</div>}
           {atlasContracts.length > 0 && <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
