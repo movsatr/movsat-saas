@@ -408,16 +408,25 @@ Deno.serve(async (req: Request) => {
       const requestAtlas = async (path: string, params: Record<string, string>) => {
         const url = new URL(`https://atlas-api.mutualignit.com.br/public_api/v2${path}`);
         for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-        const response = await fetch(url, {
-          headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
-          signal: AbortSignal.timeout(25000),
-        });
-        const body = await response.text();
-        let payload: unknown = null;
-        try { payload = JSON.parse(body); } catch { /* validated below */ }
-        if (!response.ok) throw new Error(`atlas_http_${response.status}`);
-        if (payload === null) throw new Error("atlas_invalid_json");
-        return payload;
+        let lastError = "atlas_request_failed";
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const response = await fetch(url, {
+              headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+              signal: AbortSignal.timeout(25000),
+            });
+            const body = await response.text();
+            let payload: unknown = null;
+            try { payload = JSON.parse(body); } catch { /* validated below */ }
+            if (response.ok && payload !== null) return payload;
+            lastError = response.ok ? "atlas_invalid_json" : `atlas_http_${response.status}`;
+            if (![429, 500, 502, 503, 504].includes(response.status)) break;
+          } catch (error) {
+            lastError = error instanceof Error ? error.name : "atlas_request_failed";
+          }
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+        }
+        throw new Error(lastError);
       };
 
       const objectPayload = await requestAtlas("/contract/contract_object/nested/", {
@@ -454,11 +463,11 @@ Deno.serve(async (req: Request) => {
             });
             const productRows = extractRows(productPayload);
             objectsScanned++;
-            productRowsScanned += productRows.length;
             for (const row of productRows) {
               const nestedProducts = Array.isArray(row.products) ? row.products.filter((item) =>
                 item !== null && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown>[] : [];
               const candidates = nestedProducts.length ? nestedProducts : [row];
+              productRowsScanned += candidates.length;
               for (const product of candidates) {
                 const rawId = product.product_id ?? product.id;
                 const productId = rawId == null ? "sem_id" : String(rawId);
