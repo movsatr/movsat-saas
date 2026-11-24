@@ -371,6 +371,7 @@ export function compareWithLocal(
     const tracker = Array.isArray(vehicle.rastreador) ? vehicle.rastreador[0] ?? null : vehicle.rastreador;
     return { status: 'unassigned', associateName: null, trackerStatus: tracker?.status ?? null, personMatches: null };
   }
+  const tracker = Array.isArray(vehicle.rastreador) ? vehicle.rastreador[0] ?? null : vehicle.rastreador;
   const normalizeDocument = (value: string | null) => value?.replace(/\D/g, '') ?? '';
   const remoteDocument = normalizeDocument(record.person.cpfCnpj);
   const localDocument = normalizeDocument(associate.cpf_cnpj);
@@ -378,7 +379,7 @@ export function compareWithLocal(
   return {
     status: 'matched',
     associateName: associate.nome,
-    trackerStatus: vehicle.rastreador?.status ?? null,
+    trackerStatus: tracker?.status ?? null,
     personMatches: remoteDocument && localDocument ? remoteDocument === localDocument : null,
   };
 }
