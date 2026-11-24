@@ -326,6 +326,107 @@ export async function fetchActiveTrackerRecords(query: AtlasQuery): Promise<Acti
   );
 }
 
+
+export interface ActiveProductAggregate {
+  productId: string;
+  name: string;
+  description: string;
+  supplierCode: string;
+  occurrences: number;
+  activated: number;
+  deleted: number;
+}
+
+export interface ActiveProductScanResult {
+  totalActiveObjects: number | null;
+  objectsScanned: number;
+  failedObjects: number;
+  productRowsScanned: number;
+  products: ActiveProductAggregate[];
+  pagesScanned: number;
+  complete: boolean;
+}
+
+export async function fetchActiveObjectProductCatalog(
+  query: AtlasQuery,
+): Promise<ActiveProductScanResult> {
+  const aggregate = new Map<string, ActiveProductAggregate>();
+  let page = 1;
+  let totalActiveObjects: number | null = null;
+  let objectsScanned = 0;
+  let failedObjects = 0;
+  let productRowsScanned = 0;
+  let pagesScanned = 0;
+  let expectedPages: number | null = null;
+
+  while (page <= 200) {
+    const payload = await query({
+      resource: 'active_product_scan',
+      page: String(page),
+      page_size: '100',
+    });
+    if (!isRecord(payload)) throw new Error('Resposta inválida na varredura de produtos ativos.');
+    const pageTotal = payload.totalActiveObjects == null ? null : Number(payload.totalActiveObjects);
+    if (pageTotal !== null && (!Number.isSafeInteger(pageTotal) || pageTotal < 0)) {
+      throw new Error('A Mutual Tech retornou uma contagem inválida de objetos ativos.');
+    }
+    if (totalActiveObjects !== null && pageTotal !== null && totalActiveObjects !== pageTotal) {
+      throw new Error('A contagem de objetos ativos mudou durante a varredura.');
+    }
+    if (pageTotal !== null) totalActiveObjects = pageTotal;
+    const pageObjects = Number(payload.pageObjects ?? 0);
+    const pageScanned = Number(payload.objectsScanned ?? 0);
+    const pageFailed = Number(payload.failedObjects ?? 0);
+    const pageRows = Number(payload.productRowsScanned ?? 0);
+    if (![pageObjects, pageScanned, pageFailed, pageRows].every(Number.isSafeInteger)) {
+      throw new Error('A Mutual Tech retornou métricas inválidas na varredura.');
+    }
+    if (pageScanned + pageFailed !== pageObjects || payload.pageComplete !== (pageFailed === 0 && pageScanned === pageObjects)) {
+      throw new Error(`A página ${page} teve falhas; a varredura foi interrompida para não declarar resultado incompleto como zero.`);
+    }
+    objectsScanned += pageScanned;
+    failedObjects += pageFailed;
+    productRowsScanned += pageRows;
+    pagesScanned++;
+
+    if (!Array.isArray(payload.products)) throw new Error('A Mutual Tech não retornou o catálogo de produtos da página.');
+    for (const item of payload.products) {
+      if (!isRecord(item)) continue;
+      const product: ActiveProductAggregate = {
+        productId: String(item.productId ?? 'sem_id'),
+        name: String(item.name ?? 'Nome não informado'),
+        description: String(item.description ?? ''),
+        supplierCode: String(item.supplierCode ?? ''),
+        occurrences: Number(item.occurrences ?? 0),
+        activated: Number(item.activated ?? 0),
+        deleted: Number(item.deleted ?? 0),
+      };
+      const key = [product.productId, product.name, product.description, product.supplierCode].join('|');
+      const current = aggregate.get(key) ?? { ...product, occurrences: 0, activated: 0, deleted: 0 };
+      current.occurrences += product.occurrences;
+      current.activated += product.activated;
+      current.deleted += product.deleted;
+      aggregate.set(key, current);
+    }
+
+    const hasMore = payload.hasMore === true;
+    if (!hasMore) {
+      if (totalActiveObjects !== null && objectsScanned !== totalActiveObjects) {
+        throw new Error(`Varredura encerrada com ${objectsScanned} de ${totalActiveObjects} objetos ativos. Resultado incompleto.`);
+      }
+      return {
+        totalActiveObjects, objectsScanned, failedObjects, productRowsScanned,
+        products: [...aggregate.values()].sort((a, b) => b.occurrences - a.occurrences),
+        pagesScanned, complete: true,
+      };
+    }
+    if (pageObjects === 0) throw new Error('A paginação terminou antes da contagem informada.');
+    page++;
+  }
+
+  throw new Error('A varredura ultrapassou 200 páginas e foi interrompida sem declarar conclusão.');
+}
+
 export function compareWithLocal(
   record: ActiveTrackerRecord,
   associates: Array<{
