@@ -178,6 +178,49 @@ test('vehicle/person ID mismatch fails rather than creating an unreliable link',
   );
 });
 
+
+test('tracker objects missing a contract ID fail the whole refresh', async () => {
+  await assert.rejects(
+    fetchActiveTrackerRecords(async () => ({
+      count: 1,
+      results: [{
+        id: 99,
+        person_data: { id: 7 },
+        vehicle_data: { plate: 'ABC1234' },
+        contract_data: null,
+        products_data: [{ product_id: 18, product_name: 'Rastreador veicular' }],
+      }],
+    })),
+    /sem ID de contrato/,
+  );
+});
+
+test('duplicate vehicle rows with conflicting external IDs fail closed', async () => {
+  const responses: Record<string, Record<string, unknown>> = {
+    integrations_contract_objects: {
+      id: 41, person_data: { id: 7 }, vehicle_data: { plate: 'ABC1234' },
+      contract_data: { id: 9, status: 'ATIVO' },
+      products_data: [{ product_id: 18, product_name: 'Rastreador veicular' }],
+    },
+    contract_object_product: {
+      id: 51, contract_id: 9, contract_object_id: 41, product_id: 18, activated: true, deleted: false,
+    },
+    contract_object_vehicle: {
+      id: 41, contract_id: 9, vehicle_id: 12, vehicle_external_id: 'external-A',
+      person_id: 7, status: 'ATIVO', contract_status: 'ATIVO',
+    },
+  };
+  await assert.rejects(
+    fetchActiveTrackerRecords(async ({ resource }) => ({
+      count: resource === 'integrations_contract_objects' ? 1 : 2,
+      results: resource === 'contract_object_vehicle'
+        ? [responses[resource], { ...responses[resource], vehicle_external_id: 'external-B' }]
+        : [responses[resource]],
+    })),
+    /relacionamentos divergentes/,
+  );
+});
+
 test('local reconciliation uses the external vehicle ID and reports ambiguity', () => {
   const record: ActiveTrackerRecord = {
     id: '41',
@@ -209,4 +252,5 @@ test('local reconciliation uses the external vehicle ID and reports ambiguity', 
     veiculos: [{ ...local[0].veiculos[0], id_externo: 'different-id' }],
   }]).status, 'not_found');
   assert.equal(compareWithLocal(record, [local[0], { ...local[0], id: 'associate-2' }]).status, 'ambiguous');
+  assert.equal(compareWithLocal(record, [], [{ id_externo: 'mutual-12', rastreador: { id: 'tracker-unassigned', imei: 'ignored', status: 'ativo' } }]).status, 'unassigned');
 });
