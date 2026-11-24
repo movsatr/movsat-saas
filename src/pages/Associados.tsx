@@ -38,6 +38,7 @@ export function Associados() {
   const [atlasContracts, setAtlasContracts] = useState<ActiveTrackerRecord[]>([]);
   const [productScan, setProductScan] = useState<ActiveProductScanResult | null>(null);
   const [atlasLoading, setAtlasLoading] = useState(false);
+  const [atlasProgress, setAtlasProgress] = useState<{ page: number; pagesTotal: number | null; objectsScanned: number; totalActiveObjects: number | null } | null>(null);
   const [atlasError, setAtlasError] = useState<string | null>(null);
   const [atlasLastRefresh, setAtlasLastRefresh] = useState<string | null>(null);
   const [softruckDiagnostic, setSoftruckDiagnostic] = useState<{ count: number; fields: string[]; routes?: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }> } | null>(null);
@@ -116,6 +117,7 @@ export function Associados() {
     if (role !== 'administrador' && role !== 'diretoria') return;
     setAtlasLoading(true);
     setAtlasError(null);
+    setAtlasProgress({ page: 0, pagesTotal: null, objectsScanned: 0, totalActiveObjects: null });
     try {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
@@ -144,7 +146,7 @@ export function Associados() {
         return payload.data;
       };
 
-      const scan = await fetchActiveObjectProductCatalog(atlasGet);
+      const scan = await fetchActiveObjectProductCatalog(atlasGet, setAtlasProgress);
       setProductScan(scan);
       setAtlasContracts([]);
       setSoftruckDiagnostic(null);
@@ -162,6 +164,7 @@ export function Associados() {
       }
     } finally {
       setAtlasLoading(false);
+      setAtlasProgress(null);
     }
   }, [role]);
 
@@ -321,7 +324,10 @@ export function Associados() {
             </div>
             <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
           </div>
-          {atlasLoading && <p className="mb-3 text-sm text-slate-500">Percorrendo as páginas dos objetos ativos e consultando os produtos vinculados, com até 4 requisições simultâneas…</p>}
+          {atlasLoading && <div className="mb-3 text-sm text-slate-600">
+            <p>Varredura em lotes de 50 objetos. {atlasProgress?.page ? `Página ${atlasProgress.page}${atlasProgress.pagesTotal ? ` de ${atlasProgress.pagesTotal}` : ''} · ${atlasProgress.objectsScanned.toLocaleString('pt-BR')} objetos processados` : 'Preparando primeira página…'}</p>
+            {atlasProgress?.totalActiveObjects && <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.min(100, atlasProgress.objectsScanned / atlasProgress.totalActiveObjects * 100)}%` }} /></div>}
+          </div>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
           {productScan && <div className="mb-4 rounded-lg border border-slate-200 p-4 text-sm dark:border-slate-700">
