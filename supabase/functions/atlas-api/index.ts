@@ -3,6 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const ALLOWED_ORIGINS = new Set([
   "https://movsat-saas.vercel.app",
   "https://movsat-saas-6v5hmpbk9-mov4.vercel.app",
+  "https://movsat-saas-fa17s2r8b-mov4.vercel.app",
+  "https://movsat-saas-git-movsatr-integrar-associados-rastrea-25a551-mov4.vercel.app",
   "http://localhost:5173",
 ]);
 
