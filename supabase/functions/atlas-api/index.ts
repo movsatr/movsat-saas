@@ -383,6 +383,125 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(req, 200, { ok: true, resource: "diagnostics", data: { diagnostics } });
     }
 
+
+    if (resourceName === "active_product_scan") {
+      const page = Math.max(1, Number(incomingUrl.searchParams.get("page") ?? "1"));
+      const pageSize = Math.min(100, Math.max(1, Number(incomingUrl.searchParams.get("page_size") ?? "100")));
+      if (!Number.isSafeInteger(page) || !Number.isSafeInteger(pageSize)) {
+        return jsonResponse(req, 400, { error: "invalid_pagination" });
+      }
+
+      const extractRows = (payload: unknown): Record<string, unknown>[] => {
+        const root = payload && typeof payload === "object" && !Array.isArray(payload)
+          ? payload as Record<string, unknown> : null;
+        const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
+          ? root.data as Record<string, unknown> : null;
+        const rows = Array.isArray(payload) ? payload
+          : Array.isArray(root?.results) ? root.results
+          : Array.isArray(root?.data) ? root.data
+          : Array.isArray(nested?.results) ? nested.results
+          : Array.isArray(nested?.data) ? nested.data : [];
+        return rows.filter((row): row is Record<string, unknown> =>
+          row !== null && typeof row === "object" && !Array.isArray(row));
+      };
+
+      const requestAtlas = async (path: string, params: Record<string, string>) => {
+        const url = new URL(`https://atlas-api.mutualignit.com.br/public_api/v2${path}`);
+        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+          signal: AbortSignal.timeout(25000),
+        });
+        const body = await response.text();
+        let payload: unknown = null;
+        try { payload = JSON.parse(body); } catch { /* validated below */ }
+        if (!response.ok) throw new Error(`atlas_http_${response.status}`);
+        if (payload === null) throw new Error("atlas_invalid_json");
+        return payload;
+      };
+
+      const objectPayload = await requestAtlas("/contract/contract_object/nested/", {
+        status: "ATIVO",
+        contract_status: "ATIVO",
+        page: String(page),
+        page_size: String(pageSize),
+      });
+      const objects = extractRows(objectPayload);
+      const objectRoot = objectPayload && typeof objectPayload === "object" && !Array.isArray(objectPayload)
+        ? objectPayload as Record<string, unknown> : null;
+      const objectNested = objectRoot?.data && typeof objectRoot.data === "object" && !Array.isArray(objectRoot.data)
+        ? objectRoot.data as Record<string, unknown> : null;
+      const rawTotal = objectRoot?.count ?? objectRoot?.total ?? objectNested?.count ?? objectNested?.total;
+      const total = rawTotal == null ? null : Number(rawTotal);
+
+      const productCounts = new Map<string, { productId: string; name: string; description: string; supplierCode: string; occurrences: number; activated: number; deleted: number }>();
+      let objectsScanned = 0;
+      let productRowsScanned = 0;
+      let failedObjects = 0;
+      let nextIndex = 0;
+      const workers = Array.from({ length: Math.min(4, objects.length) }, async () => {
+        while (true) {
+          const index = nextIndex++;
+          if (index >= objects.length) return;
+          const object = objects[index];
+          const objectId = object.id == null ? "" : String(object.id);
+          if (!objectId) { failedObjects++; continue; }
+          try {
+            const productPayload = await requestAtlas("/contract/contract_object_product/", {
+              contract_object_id: objectId,
+              page: "1",
+              page_size: "100",
+            });
+            const productRows = extractRows(productPayload);
+            objectsScanned++;
+            productRowsScanned += productRows.length;
+            for (const row of productRows) {
+              const nestedProducts = Array.isArray(row.products) ? row.products.filter((item) =>
+                item !== null && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown>[] : [];
+              const candidates = nestedProducts.length ? nestedProducts : [row];
+              for (const product of candidates) {
+                const rawId = product.product_id ?? product.id;
+                const productId = rawId == null ? "sem_id" : String(rawId);
+                const name = String(product.product_name ?? product.name ?? "Nome não informado");
+                const description = String(product.subproduct_description ?? "");
+                const supplierCode = String(product.subproduct_supplier_code ?? "");
+                const key = [productId, name, description, supplierCode].join("|");
+                const aggregate = productCounts.get(key) ?? {
+                  productId, name, description, supplierCode, occurrences: 0, activated: 0, deleted: 0,
+                };
+                aggregate.occurrences++;
+                if (product.activated === true) aggregate.activated++;
+                if (product.deleted === true) aggregate.deleted++;
+                productCounts.set(key, aggregate);
+              }
+            }
+          } catch {
+            failedObjects++;
+          }
+        }
+      });
+      await Promise.all(workers);
+
+      const products = [...productCounts.values()].sort((a, b) =>
+        b.occurrences - a.occurrences || a.productId.localeCompare(b.productId));
+      return jsonResponse(req, 200, {
+        ok: true,
+        resource: "active_product_scan",
+        data: {
+          page,
+          pageSize,
+          totalActiveObjects: total,
+          pageObjects: objects.length,
+          objectsScanned,
+          failedObjects,
+          productRowsScanned,
+          products,
+          pageComplete: failedObjects === 0 && objectsScanned === objects.length,
+          hasMore: total === null ? objects.length === pageSize : page * pageSize < total,
+        },
+      });
+    }
+
     const resource = RESOURCES[resourceName];
 
     if (!resource) {
