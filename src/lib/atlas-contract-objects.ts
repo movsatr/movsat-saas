@@ -357,7 +357,6 @@ export async function fetchActiveObjectProductCatalog(
   let failedObjects = 0;
   let productRowsScanned = 0;
   let pagesScanned = 0;
-  let expectedPages: number | null = null;
 
   while (page <= 200) {
     const payload = await query({
