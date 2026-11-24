@@ -37,7 +37,7 @@ test('fetchAllPages rejects failed or incomplete pagination', async () => {
 
 test('fetchActiveTrackerRecords joins active products, objects, vehicles and people by IDs', async () => {
   const responses: Record<string, Record<string, unknown>> = {
-    integrations_contract_objects: {
+    softruck_contract_objects: {
       id: 41,
       person_data: { id: 7, name: 'Pessoa', cpf_cnpj: '123.456.789-00' },
       vehicle_data: { plate: 'ABC1234', model: 'Modelo' },
@@ -92,7 +92,7 @@ test('inactive contracts or unactivated and non-tracker products are not eligibl
     contractStatus?: string;
     objectStatus?: string;
   }) => ({
-    integrations_contract_objects: {
+    softruck_contract_objects: {
       id: 41,
       person_data: { id: 7 },
       vehicle_data: { plate: 'ABC1234' },
@@ -139,7 +139,7 @@ test('inactive contracts or unactivated and non-tracker products are not eligibl
 
 test('vehicle/person ID mismatch fails rather than creating an unreliable link', async () => {
   const responses = {
-    integrations_contract_objects: {
+    softruck_contract_objects: {
       id: 41,
       person_data: { id: 7 },
       vehicle_data: {},
@@ -197,7 +197,7 @@ test('tracker objects missing a contract ID fail the whole refresh', async () =>
 
 test('duplicate vehicle rows with conflicting external IDs fail closed', async () => {
   const responses: Record<string, Record<string, unknown>> = {
-    integrations_contract_objects: {
+    softruck_contract_objects: {
       id: 41, person_data: { id: 7 }, vehicle_data: { plate: 'ABC1234' },
       contract_data: { id: 9, status: 'ATIVO' },
       products_data: [{ product_id: 18, product_name: 'Rastreador veicular' }],
@@ -212,7 +212,7 @@ test('duplicate vehicle rows with conflicting external IDs fail closed', async (
   };
   await assert.rejects(
     fetchActiveTrackerRecords(async ({ resource }) => ({
-      count: resource === 'integrations_contract_objects' ? 1 : 2,
+      count: resource === 'softruck_contract_objects' ? 1 : 2,
       results: resource === 'contract_object_vehicle'
         ? [responses[resource], { ...responses[resource], vehicle_external_id: 'external-B' }]
         : [responses[resource]],
@@ -253,4 +253,34 @@ test('local reconciliation uses the external vehicle ID and reports ambiguity', 
   }]).status, 'not_found');
   assert.equal(compareWithLocal(record, [local[0], { ...local[0], id: 'associate-2' }]).status, 'ambiguous');
   assert.equal(compareWithLocal(record, [], [{ id_externo: 'mutual-12', rastreador: { id: 'tracker-unassigned', imei: 'ignored', status: 'ativo' } }]).status, 'unassigned');
+});
+
+
+test('fetchAllPages respects an explicit next=false terminal flag without count', async () => {
+  const requestedPages: string[] = [];
+  const rows = await fetchAllPages(async ({ page }) => {
+    requestedPages.push(page);
+    return { next: false, results: [{ id: 1 }] };
+  }, { resource: 'test' }, 1);
+  assert.deepEqual(requestedPages, ['1']);
+  assert.equal(rows.length, 1);
+});
+
+test('duplicate objects with conflicting nested contract or person IDs fail closed', async () => {
+  const base = {
+    id: 41,
+    person_data: { id: 7 },
+    vehicle_data: { plate: 'ABC1234' },
+    contract_data: { id: 9, status: 'ATIVO' },
+    products_data: [],
+  };
+  await assert.rejects(
+    fetchActiveTrackerRecords(async ({ resource }) => ({
+      count: 2,
+      results: resource === 'softruck_contract_objects'
+        ? [base, { ...base, contract_data: { id: 10, status: 'ATIVO' } }]
+        : [],
+    })),
+    /relacionamentos divergentes/,
+  );
 });
