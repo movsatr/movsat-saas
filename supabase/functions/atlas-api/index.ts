@@ -385,9 +385,12 @@ Deno.serve(async (req: Request) => {
 
 
     if (resourceName === "active_product_scan") {
-      const page = Math.max(1, Number(incomingUrl.searchParams.get("page") ?? "1"));
-      const pageSize = Math.min(100, Math.max(1, Number(incomingUrl.searchParams.get("page_size") ?? "100")));
-      if (!Number.isSafeInteger(page) || !Number.isSafeInteger(pageSize)) {
+      const page = Number(incomingUrl.searchParams.get("page") ?? "1");
+      const pageSize = Number(incomingUrl.searchParams.get("page_size") ?? "100");
+      const requestedExpectedTotal = incomingUrl.searchParams.get("expected_total");
+      const expectedTotalInput = requestedExpectedTotal === null ? null : Number(requestedExpectedTotal);
+      if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100 ||
+          (expectedTotalInput !== null && (!Number.isSafeInteger(expectedTotalInput) || expectedTotalInput < 0))) {
         return jsonResponse(req, 400, { error: "invalid_pagination" });
       }
 
@@ -441,7 +444,14 @@ Deno.serve(async (req: Request) => {
       const objectNested = objectRoot?.data && typeof objectRoot.data === "object" && !Array.isArray(objectRoot.data)
         ? objectRoot.data as Record<string, unknown> : null;
       const rawTotal = objectRoot?.count ?? objectRoot?.total ?? objectNested?.count ?? objectNested?.total;
-      const total = rawTotal == null ? null : Number(rawTotal);
+      const reportedTotal = rawTotal == null ? null : Number(rawTotal);
+      if (reportedTotal !== null && (!Number.isSafeInteger(reportedTotal) || reportedTotal < 0)) {
+        return jsonResponse(req, 502, { error: "atlas_invalid_total" });
+      }
+      // A contagem pode oscilar durante a paginação. Mantemos a primeira
+      // contagem como alvo e reportamos alterações sem encerrar cedo.
+      const expectedTotal = expectedTotalInput ?? reportedTotal;
+      const totalChanged = expectedTotal !== null && reportedTotal !== null && expectedTotal !== reportedTotal;
 
       const productCounts = new Map<string, { productId: string; name: string; description: string; supplierCode: string; occurrences: number; activated: number; deleted: number }>();
       let objectsScanned = 0;
@@ -510,7 +520,9 @@ Deno.serve(async (req: Request) => {
         data: {
           page,
           pageSize,
-          totalActiveObjects: total,
+          totalActiveObjects: expectedTotal,
+          reportedTotalActiveObjects: reportedTotal,
+          totalChanged,
           pageObjects: objects.length,
           objectsScanned,
           failedObjects,
@@ -520,7 +532,7 @@ Deno.serve(async (req: Request) => {
           effectiveConcurrency: Math.min(10, objects.length),
           products,
           pageComplete: failedObjects === 0 && objectsScanned === objects.length,
-          hasMore: total === null ? objects.length === pageSize : page * pageSize < total,
+          hasMore: expectedTotal === null ? objects.length === pageSize : page * pageSize < expectedTotal,
         },
       });
     }
