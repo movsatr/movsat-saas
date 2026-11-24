@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
-import { compareWithLocal, fetchActiveTrackerRecords, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
+import { compareWithLocal, fetchActiveTrackerRecords, fetchAllPages, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
 const PAGE_SIZE = 50;
@@ -39,6 +39,7 @@ export function Associados() {
   const [atlasLoading, setAtlasLoading] = useState(false);
   const [atlasError, setAtlasError] = useState<string | null>(null);
   const [atlasLastRefresh, setAtlasLastRefresh] = useState<string | null>(null);
+  const [softruckDiagnostic, setSoftruckDiagnostic] = useState<{ count: number; fields: string[] } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -135,12 +136,14 @@ export function Associados() {
         return payload.data;
       };
 
-      const found = await fetchActiveTrackerRecords(atlasGet);
-      found.sort((a, b) => (a.vehicle.plate ?? '').localeCompare(b.vehicle.plate ?? ''));
-      setAtlasContracts(found);
+      const softruckObjects = await fetchAllPages(atlasGet, { resource: 'softruck_contract_objects' });
+      const fields = [...new Set(softruckObjects.flatMap((row) => Object.keys(row)))].sort();
+      setSoftruckDiagnostic({ count: softruckObjects.length, fields });
+      setAtlasContracts([]);
       setAtlasLastRefresh(new Date().toISOString());
     } catch (error) {
       setAtlasContracts([]);
+      setSoftruckDiagnostic(null);
       setAtlasLastRefresh(null);
       const msg = error instanceof Error ? error.message : 'Falha ao consultar os rastreadores ativos da Mutual Tech.';
       if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
@@ -305,13 +308,14 @@ export function Associados() {
                 <Badge color="slate">origem dos dados</Badge>
                 <Badge color="blue">somente leitura</Badge>
               </div>
-              <p className="mt-1 text-sm text-slate-500">Rastreadores elegíveis por vínculo de produto ativo, objeto ativo e contrato ativo. Produtos são identificados pelos nomes e descrições retornados pela Mutual Tech; nenhum ID de produto é fixado.</p>
+              <p className="mt-1 text-sm text-slate-500">Consulta somente leitura da rota Softruck da Mutual Tech. Primeiro validamos o retorno real e seus campos; só depois definiremos a regra de elegibilidade.</p>
             </div>
             <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
           </div>
           {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando todas as páginas da Mutual Tech e conciliando os IDs…</p>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
+          {softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rota Softruck respondida: {softruckDiagnostic.count} registros.</p><p className="mt-1 text-xs text-slate-500">Campos retornados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">Esta etapa não classifica rastreadores como ativos; a regra será aplicada somente após validar os campos da resposta real.</p></div>}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
