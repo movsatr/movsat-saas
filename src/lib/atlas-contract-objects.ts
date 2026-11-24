@@ -28,7 +28,7 @@ export interface ActiveTrackerRecord {
 }
 
 export interface LocalVehicleMatch {
-  status: 'matched' | 'missing_external_id' | 'not_found' | 'ambiguous';
+  status: 'matched' | 'unassigned' | 'missing_external_id' | 'not_found' | 'ambiguous';
   associateName: string | null;
   trackerStatus: string | null;
   personMatches: boolean | null;
@@ -189,7 +189,7 @@ function mergeActiveTrackerRecords(
     'contract_id', 'contract_object_id', 'product_id', 'activated', 'deleted',
   ]);
   const uniqueVehicles = uniqueById(vehicleRows, (row) => valueId(row.id), [
-    'contract_id', 'vehicle_id', 'person_id', 'status', 'contract_status',
+    'contract_id', 'vehicle_id', 'person_id', 'vehicle_external_id', 'status', 'contract_status',
   ]);
 
   const productsByObject = new Map<string, AtlasRecord[]>();
@@ -301,7 +301,14 @@ export async function fetchActiveTrackerRecords(query: AtlasQuery): Promise<Acti
   const objects = await fetchAllPages(query, { resource: 'integrations_contract_objects' });
   const contractIds = [...new Set(objects.map((row) => {
     const contractData = isRecord(row.contract_data) ? row.contract_data : null;
-    return valueId(contractData?.id);
+    const vehicleData = isRecord(row.vehicle_data) ? row.vehicle_data : null;
+    const catalogProducts = Array.isArray(row.products_data) ? row.products_data.filter(isRecord) : [];
+    const hasTrackerProduct = catalogProducts.some(isTrackerProduct);
+    const contractId = valueId(contractData?.id);
+    if (vehicleData && hasTrackerProduct && !contractId) {
+      throw new Error('A Mutual Tech retornou um objeto com produto rastreador sem ID de contrato; consulta interrompida.');
+    }
+    return contractId;
   }).filter(Boolean))];
 
   const contractData = await mapWithConcurrency(contractIds, 4, async (contractId) => {
@@ -332,17 +339,26 @@ export function compareWithLocal(
       rastreador?: { id: string; imei: string; status: string } | null;
     }>;
   }>,
+  unassignedVehicles: Array<{
+    id_externo?: string | null;
+    rastreador?: { id: string; imei: string; status: string } | null;
+  }> = [],
 ): LocalVehicleMatch {
   const externalId = record.vehicle.externalId?.trim();
   if (!externalId) {
     return { status: 'missing_external_id', associateName: null, trackerStatus: null, personMatches: null };
   }
 
-  const matches = associates.flatMap((associate) =>
-    associate.veiculos
+  const matches = [
+    ...associates.flatMap((associate) =>
+      associate.veiculos
+        .filter((vehicle) => vehicle.id_externo?.trim() === externalId)
+        .map((vehicle) => ({ associate, vehicle }))
+    ),
+    ...unassignedVehicles
       .filter((vehicle) => vehicle.id_externo?.trim() === externalId)
-      .map((vehicle) => ({ associate, vehicle }))
-  );
+      .map((vehicle) => ({ associate: null, vehicle })),
+  ];
   if (matches.length === 0) {
     return { status: 'not_found', associateName: null, trackerStatus: null, personMatches: null };
   }
@@ -351,6 +367,9 @@ export function compareWithLocal(
   }
 
   const { associate, vehicle } = matches[0];
+  if (!associate) {
+    return { status: 'unassigned', associateName: null, trackerStatus: vehicle.rastreador?.status ?? null, personMatches: null };
+  }
   const normalizeDocument = (value: string | null) => value?.replace(/\D/g, '') ?? '';
   const remoteDocument = normalizeDocument(record.person.cpfCnpj);
   const localDocument = normalizeDocument(associate.cpf_cnpj);
