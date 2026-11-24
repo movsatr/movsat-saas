@@ -271,6 +271,13 @@ Deno.serve(async (req: Request) => {
           summarize(`contract_object_product?filter=${probe.key}`, "/contract/contract_object_product/", { [probe.key]: probe.value })
         ));
         diagnostics.push(...productProbes);
+        if (contractId) {
+          const productIdProbes = await Promise.all(["13", "283"].flatMap((productId) => [
+            summarize(`contract_object_product?contract_id+product_id=${productId}`, "/contract/contract_object_product/", { contract_id: contractId, product_id: productId }),
+            summarize(`contract_object_product?contract_object_id+product_id=${productId}`, "/contract/contract_object_product/", { contract_object_id: objectId, product_id: productId }),
+          ]));
+          diagnostics.push(...productIdProbes);
+        }
 
         const nestedFields = (key: string) => {
           const value = sampleObject?.[key];
