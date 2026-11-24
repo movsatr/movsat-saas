@@ -339,6 +339,8 @@ export interface ActiveProductAggregate {
 
 export interface ActiveProductScanResult {
   totalActiveObjects: number | null;
+  latestReportedTotal: number | null;
+  countChangedDuringScan: boolean;
   objectsScanned: number;
   failedObjects: number;
   productRowsScanned: number;
@@ -354,6 +356,8 @@ export async function fetchActiveObjectProductCatalog(
   const aggregate = new Map<string, ActiveProductAggregate>();
   let page = 1;
   let totalActiveObjects: number | null = null;
+  let latestReportedTotal: number | null = null;
+  let countChangedDuringScan = false;
   let objectsScanned = 0;
   let failedObjects = 0;
   let productRowsScanned = 0;
@@ -361,20 +365,23 @@ export async function fetchActiveObjectProductCatalog(
 
   const pageSize = 50;
   while (page <= 300) {
-    const payload = await query({
+    const requestParams: Record<string, string> = {
       resource: 'active_product_scan',
       page: String(page),
       page_size: String(pageSize),
-    });
+    };
+    if (totalActiveObjects !== null) requestParams.expected_total = String(totalActiveObjects);
+    const payload = await query(requestParams);
     if (!isRecord(payload)) throw new Error('Resposta inválida na varredura de produtos ativos.');
     const pageTotal = payload.totalActiveObjects == null ? null : Number(payload.totalActiveObjects);
     if (pageTotal !== null && (!Number.isSafeInteger(pageTotal) || pageTotal < 0)) {
       throw new Error('A Mutual Tech retornou uma contagem inválida de objetos ativos.');
     }
+    latestReportedTotal = pageTotal;
     if (totalActiveObjects !== null && pageTotal !== null && totalActiveObjects !== pageTotal) {
-      throw new Error('A contagem de objetos ativos mudou durante a varredura.');
+      countChangedDuringScan = true;
     }
-    if (pageTotal !== null) totalActiveObjects = pageTotal;
+    if (totalActiveObjects === null && pageTotal !== null) totalActiveObjects = pageTotal;
     const pageObjects = Number(payload.pageObjects ?? 0);
     const pageScanned = Number(payload.objectsScanned ?? 0);
     const pageFailed = Number(payload.failedObjects ?? 0);
@@ -422,7 +429,8 @@ export async function fetchActiveObjectProductCatalog(
         throw new Error(`Varredura encerrada com ${objectsScanned} de ${totalActiveObjects} objetos ativos. Resultado incompleto.`);
       }
       return {
-        totalActiveObjects, objectsScanned, failedObjects, productRowsScanned,
+        totalActiveObjects, latestReportedTotal, countChangedDuringScan,
+        objectsScanned, failedObjects, productRowsScanned,
         products: [...aggregate.values()].sort((a, b) => b.occurrences - a.occurrences),
         pagesScanned, complete: true,
       };
