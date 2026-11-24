@@ -374,11 +374,17 @@ export async function fetchActiveObjectProductCatalog(
     const payload = await query(requestParams);
     if (!isRecord(payload)) throw new Error('Resposta inválida na varredura de produtos ativos.');
     const pageTotal = payload.totalActiveObjects == null ? null : Number(payload.totalActiveObjects);
-    if (pageTotal !== null && (!Number.isSafeInteger(pageTotal) || pageTotal < 0)) {
+    const reportedTotal = payload.reportedTotalActiveObjects == null
+      ? pageTotal
+      : Number(payload.reportedTotalActiveObjects);
+    if (
+      (pageTotal !== null && (!Number.isSafeInteger(pageTotal) || pageTotal < 0)) ||
+      (reportedTotal !== null && (!Number.isSafeInteger(reportedTotal) || reportedTotal < 0))
+    ) {
       throw new Error('A Mutual Tech retornou uma contagem inválida de objetos ativos.');
     }
-    latestReportedTotal = pageTotal;
-    if (totalActiveObjects !== null && pageTotal !== null && totalActiveObjects !== pageTotal) {
+    latestReportedTotal = reportedTotal;
+    if (payload.totalChanged === true || (totalActiveObjects !== null && reportedTotal !== null && totalActiveObjects !== reportedTotal)) {
       countChangedDuringScan = true;
     }
     if (totalActiveObjects === null && pageTotal !== null) totalActiveObjects = pageTotal;
