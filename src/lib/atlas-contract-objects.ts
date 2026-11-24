@@ -432,7 +432,7 @@ export async function fetchActiveObjectProductCatalog(
         totalActiveObjects, latestReportedTotal, countChangedDuringScan,
         objectsScanned, failedObjects, productRowsScanned,
         products: [...aggregate.values()].sort((a, b) => b.occurrences - a.occurrences),
-        pagesScanned, complete: true,
+        pagesScanned, complete: !countChangedDuringScan,
       };
     }
     if (pageObjects === 0) throw new Error('A paginação terminou antes da contagem informada.');
