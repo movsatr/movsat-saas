@@ -253,15 +253,28 @@ Deno.serve(async (req: Request) => {
           summarize(`contract_object_product?filter=${probe.key}`, "/contract/contract_object_product/", { [probe.key]: probe.value })
         ));
         diagnostics.push(...productProbes);
+
+        const nestedFields = (key: string) => {
+          const value = sampleObject?.[key];
+          return value && typeof value === "object" && !Array.isArray(value)
+            ? Object.keys(value as Record<string, unknown>).sort().map((field) => `${key}.${field}`)
+            : [];
+        };
         const implementos = sampleObject.implementos_data;
         diagnostics.push({
-          resource: "nested_object_product_shape",
+          resource: "nested_object_shape",
           httpStatus: 200,
           count: null,
           pageRows: null,
           topLevelKeys: [],
           dataKeys: [],
           sampleFields: [
+            ...nestedFields("person_data"),
+            ...nestedFields("vehicle_data"),
+            ...nestedFields("contract_data"),
+            `status=${String(sampleObject.status ?? "missing")}`,
+            `contract_status=${String(sampleObject.contract_status ?? "missing")}`,
+            `deleted_type=${sampleObject.deleted === undefined ? "missing" : typeof sampleObject.deleted}`,
             `implementos_data_type=${Array.isArray(implementos) ? "array" : implementos === null ? "null" : typeof implementos}`,
             ...(Array.isArray(implementos) ? [`implementos_data_length=${implementos.length}`] : []),
             ...(implementos && typeof implementos === "object" && !Array.isArray(implementos)
@@ -270,6 +283,60 @@ Deno.serve(async (req: Request) => {
             ...(Array.isArray(sampleObject.implementos_ids) ? [`implementos_ids_length=${sampleObject.implementos_ids.length}`] : []),
           ],
         });
+
+        if (objectId) {
+          const productUrl = new URL("https://atlas-api.mutualignit.com.br/public_api/v2/contract/contract_object_product/");
+          productUrl.searchParams.set("contract_object_id", objectId);
+          productUrl.searchParams.set("page", "1");
+          productUrl.searchParams.set("page_size", "10");
+          try {
+            const productResponse = await fetch(productUrl, {
+              headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+              signal: AbortSignal.timeout(30000),
+            });
+            const productPayload: unknown = await productResponse.json();
+            const productRoot = productPayload && typeof productPayload === "object" && !Array.isArray(productPayload)
+              ? productPayload as Record<string, unknown> : null;
+            const productNested = productRoot?.data && typeof productRoot.data === "object" && !Array.isArray(productRoot.data)
+              ? productRoot.data as Record<string, unknown> : null;
+            const productRows = Array.isArray(productRoot?.results) ? productRoot.results
+              : Array.isArray(productRoot?.data) ? productRoot.data
+              : Array.isArray(productNested?.results) ? productNested.results
+              : Array.isArray(productNested?.data) ? productNested.data : [];
+            const firstProductRow = productRows[0] && typeof productRows[0] === "object" && !Array.isArray(productRows[0])
+              ? productRows[0] as Record<string, unknown> : null;
+            const products = Array.isArray(firstProductRow?.products) ? firstProductRow.products : [];
+            const firstProduct = products[0] && typeof products[0] === "object" && !Array.isArray(products[0])
+              ? products[0] as Record<string, unknown> : null;
+            diagnostics.push({
+              resource: "product_nested_shape",
+              httpStatus: productResponse.status,
+              count: null,
+              pageRows: productRows.length,
+              topLevelKeys: productRoot ? Object.keys(productRoot).sort() : [],
+              dataKeys: productNested ? Object.keys(productNested).sort() : [],
+              sampleFields: [
+                ...(firstProductRow ? Object.keys(firstProductRow).sort().map((key) => `row.${key}`) : []),
+                `products_type=${Array.isArray(firstProductRow?.products) ? "array" : typeof firstProductRow?.products}`,
+                `products_length=${products.length}`,
+                ...(firstProduct ? Object.keys(firstProduct).sort().map((key) => `products[0].${key}`) : []),
+                ...(firstProduct ? ["activated", "deleted", "status", "product_name", "subproduct_description", "subproduct_supplier_code"]
+                  .filter((key) => firstProduct[key] !== undefined)
+                  .map((key) => `${key}=${typeof firstProduct[key] === "string" || typeof firstProduct[key] === "boolean" || typeof firstProduct[key] === "number" ? String(firstProduct[key]) : Array.isArray(firstProduct[key]) ? "array" : typeof firstProduct[key]}`) : []),
+              ],
+            });
+          } catch (error) {
+            diagnostics.push({
+              resource: "product_nested_shape",
+              httpStatus: 0,
+              count: null,
+              pageRows: null,
+              topLevelKeys: [],
+              dataKeys: [],
+              sampleFields: [error instanceof Error ? error.name : "unknown"],
+            });
+          }
+        }
       }
       return jsonResponse(req, 200, { ok: true, resource: "diagnostics", data: { diagnostics } });
     }
