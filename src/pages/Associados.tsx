@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
-import { compareWithLocal, fetchActiveTrackerRecords, fetchAllPages, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
+import { compareWithLocal, fetchAllPages, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
 const PAGE_SIZE = 50;
