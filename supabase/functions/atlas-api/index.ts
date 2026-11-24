@@ -213,14 +213,21 @@ Deno.serve(async (req: Request) => {
         }
       };
 
-      const diagnostics = await Promise.all(targets.map((target) =>
-        summarize(target.name, target.path)
-      ));
+      const activeStatusProbes = await Promise.all([
+        summarize("contract_object_nested?contract_status=ATIVO", "/contract/contract_object/nested/", { contract_status: "ATIVO" }),
+        summarize("contract_object_nested?status=ATIVO", "/contract/contract_object/nested/", { status: "ATIVO" }),
+        summarize("contract_object_nested?status=ATIVO&contract_status=ATIVO", "/contract/contract_object/nested/", { status: "ATIVO", contract_status: "ATIVO" }),
+      ]);
+      diagnostics.push(...activeStatusProbes);
 
       const sampleUrl = new URL("https://atlas-api.mutualignit.com.br/public_api/v2/contract/contract_object/nested/");
+      sampleUrl.searchParams.set("status", "ATIVO");
+      sampleUrl.searchParams.set("contract_status", "ATIVO");
       sampleUrl.searchParams.set("page", "1");
       sampleUrl.searchParams.set("page_size", "1");
       let sampleObject: Record<string, unknown> | null = null;
+      let sampleRootKeys: string[] = [];
+      let sampleDataKeys: string[] = [];
       try {
         const sampleResponse = await fetch(sampleUrl, {
           headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
@@ -231,6 +238,8 @@ Deno.serve(async (req: Request) => {
           ? samplePayload as Record<string, unknown> : null;
         const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
           ? root.data as Record<string, unknown> : null;
+        sampleRootKeys = root ? Object.keys(root).sort() : [];
+        sampleDataKeys = nested ? Object.keys(nested).sort() : [];
         const rows = Array.isArray(root?.results) ? root.results
           : Array.isArray(root?.data) ? root.data
           : Array.isArray(nested?.results) ? nested.results
@@ -274,6 +283,8 @@ Deno.serve(async (req: Request) => {
             ...nestedFields("contract_data"),
             `status=${String(sampleObject.status ?? "missing")}`,
             `contract_status=${String(sampleObject.contract_status ?? "missing")}`,
+            `sample_root_keys=${sampleRootKeys.join(",") || "none"}`,
+            `sample_data_keys=${sampleDataKeys.join(",") || "none"}`,
             `deleted_type=${sampleObject.deleted === undefined ? "missing" : typeof sampleObject.deleted}`,
             `implementos_data_type=${Array.isArray(implementos) ? "array" : implementos === null ? "null" : typeof implementos}`,
             ...(Array.isArray(implementos) ? [`implementos_data_length=${implementos.length}`] : []),
@@ -319,7 +330,10 @@ Deno.serve(async (req: Request) => {
                 ...(firstProductRow ? Object.keys(firstProductRow).sort().map((key) => `row.${key}`) : []),
                 `products_type=${Array.isArray(firstProductRow?.products) ? "array" : typeof firstProductRow?.products}`,
                 `products_length=${products.length}`,
-                ...(firstProduct ? Object.keys(firstProduct).sort().map((key) => `products[0].${key}`) : []),
+                `product_root_keys=${productRoot ? Object.keys(productRoot).sort().join(",") : "none"}`,
+            `product_data_type=${Array.isArray(productRoot?.data) ? "array" : productRoot?.data === undefined ? "missing" : typeof productRoot?.data}`,
+            `product_data_keys=${productNested ? Object.keys(productNested).sort().join(",") : "none"}`,
+            ...(firstProduct ? Object.keys(firstProduct).sort().map((key) => `products[0].${key}`) : []),
                 ...(firstProduct ? ["activated", "deleted", "status", "product_name", "subproduct_description", "subproduct_supplier_code"]
                   .filter((key) => firstProduct[key] !== undefined)
                   .map((key) => `${key}=${typeof firstProduct[key] === "string" || typeof firstProduct[key] === "boolean" || typeof firstProduct[key] === "number" ? String(firstProduct[key]) : Array.isArray(firstProduct[key]) ? "array" : typeof firstProduct[key]}`) : []),
