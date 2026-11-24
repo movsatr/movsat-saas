@@ -169,8 +169,9 @@ Deno.serve(async (req: Request) => {
         { name: "contract_object_vehicle", path: "/contract/contract_object_vehicle/" },
         { name: "contracts", path: "/contract/" },
       ];
-      const diagnostics = await Promise.all(targets.map(async (target) => {
-        const url = new URL(`https://atlas-api.mutualignit.com.br/public_api/v2${target.path}`);
+      const summarize = async (name: string, path: string, params: Record<string, string> = {}) => {
+        const url = new URL(`https://atlas-api.mutualignit.com.br/public_api/v2${path}`);
+        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
         url.searchParams.set("page", "1");
         url.searchParams.set("page_size", "100");
         try {
@@ -179,8 +180,9 @@ Deno.serve(async (req: Request) => {
             headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
             signal: AbortSignal.timeout(30000),
           });
-          if (!response.ok) return { resource: target.name, httpStatus: response.status, count: null, pageRows: null, topLevelKeys: [], dataKeys: [], sampleFields: [] };
-          const payload: unknown = await response.json();
+          const body = await response.text();
+          let payload: unknown = null;
+          try { payload = JSON.parse(body); } catch { /* no JSON body */ }
           const root = payload && typeof payload === "object" && !Array.isArray(payload)
             ? payload as Record<string, unknown> : null;
           const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
@@ -193,19 +195,82 @@ Deno.serve(async (req: Request) => {
           const rawCount = root?.count ?? root?.total ?? nested?.count ?? nested?.total;
           const first = rows[0] && typeof rows[0] === "object" && !Array.isArray(rows[0])
             ? rows[0] as Record<string, unknown> : null;
+          const errorHint = !response.ok && root
+            ? [root.detail, root.error, root.message].find((value) => typeof value === "string") as string | undefined
+            : undefined;
           return {
-            resource: target.name,
+            resource: name,
             httpStatus: response.status,
             count: rawCount == null ? null : Number(rawCount),
             pageRows: rows.length,
             topLevelKeys: root ? Object.keys(root).sort() : [],
             dataKeys: nested ? Object.keys(nested).sort() : [],
             sampleFields: first ? Object.keys(first).sort() : [],
+            ...(errorHint ? { errorHint: errorHint.slice(0, 240) } : {}),
           };
         } catch (error) {
-          return { resource: target.name, httpStatus: 0, count: null, pageRows: null, topLevelKeys: [], dataKeys: [], sampleFields: [], error: error instanceof Error ? error.name : "unknown" };
+          return { resource: name, httpStatus: 0, count: null, pageRows: null, topLevelKeys: [], dataKeys: [], sampleFields: [], errorHint: error instanceof Error ? error.name : "unknown" };
         }
-      }));
+      };
+
+      const diagnostics = await Promise.all(targets.map((target) =>
+        summarize(target.name, target.path)
+      ));
+
+      const sampleUrl = new URL("https://atlas-api.mutualignit.com.br/public_api/v2/contract/contract_object/nested/");
+      sampleUrl.searchParams.set("page", "1");
+      sampleUrl.searchParams.set("page_size", "1");
+      let sampleObject: Record<string, unknown> | null = null;
+      try {
+        const sampleResponse = await fetch(sampleUrl, {
+          headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+          signal: AbortSignal.timeout(30000),
+        });
+        const samplePayload = await sampleResponse.json();
+        const root = samplePayload && typeof samplePayload === "object" && !Array.isArray(samplePayload)
+          ? samplePayload as Record<string, unknown> : null;
+        const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
+          ? root.data as Record<string, unknown> : null;
+        const rows = Array.isArray(root?.results) ? root.results
+          : Array.isArray(root?.data) ? root.data
+          : Array.isArray(nested?.results) ? nested.results
+          : Array.isArray(nested?.data) ? nested.data : [];
+        sampleObject = rows[0] && typeof rows[0] === "object" && !Array.isArray(rows[0])
+          ? rows[0] as Record<string, unknown> : null;
+      } catch { /* base route diagnostic already reports transport status */ }
+
+      if (sampleObject) {
+        const objectId = typeof sampleObject.id === "string" || typeof sampleObject.id === "number"
+          ? String(sampleObject.id) : "";
+        const contractId = typeof sampleObject.contract_id === "string" || typeof sampleObject.contract_id === "number"
+          ? String(sampleObject.contract_id) : "";
+        const probes = [
+          ...(objectId ? [{ key: "object_id", value: objectId }] : []),
+          ...(objectId ? [{ key: "contract_object_id", value: objectId }] : []),
+          ...(contractId ? [{ key: "contract_id", value: contractId }] : []),
+        ];
+        const productProbes = await Promise.all(probes.map((probe) =>
+          summarize(`contract_object_product?filter=${probe.key}`, "/contract/contract_object_product/", { [probe.key]: probe.value })
+        ));
+        diagnostics.push(...productProbes);
+        const implementos = sampleObject.implementos_data;
+        diagnostics.push({
+          resource: "nested_object_product_shape",
+          httpStatus: 200,
+          count: null,
+          pageRows: null,
+          topLevelKeys: [],
+          dataKeys: [],
+          sampleFields: [
+            `implementos_data_type=${Array.isArray(implementos) ? "array" : implementos === null ? "null" : typeof implementos}`,
+            ...(Array.isArray(implementos) ? [`implementos_data_length=${implementos.length}`] : []),
+            ...(implementos && typeof implementos === "object" && !Array.isArray(implementos)
+              ? Object.keys(implementos as Record<string, unknown>).map((key) => `implementos_data.${key}`) : []),
+            `implementos_ids_type=${Array.isArray(sampleObject.implementos_ids) ? "array" : typeof sampleObject.implementos_ids}`,
+            ...(Array.isArray(sampleObject.implementos_ids) ? [`implementos_ids_length=${sampleObject.implementos_ids.length}`] : []),
+          ],
+        });
+      }
       return jsonResponse(req, 200, { ok: true, resource: "diagnostics", data: { diagnostics } });
     }
 
