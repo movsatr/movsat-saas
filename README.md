@@ -16,16 +16,12 @@ Dashboard, Associados, Rastreadores, Veículos, Ordens de Serviço, Prestadores,
 
 Operador, Supervisor, Diretoria e Administrador — com matriz de permissões aplicada no frontend e via RLS no banco.
 
-## Consulta de rastreadores Mutual Tech
+## Integração Mutual Tech / Softruck
 
-A tela **Associados** oferece uma consulta somente leitura para `administrador` e `diretoria`. O token Atlas e o `supplier_id` usado pelo endpoint de integração geral devem ser configurados como secrets da Edge Function `atlas-api`:
+A tela **Associados** está sendo preparada para consultar, em modo somente leitura, a rota `/softruck/contract_objects/` da API Atlas v2. Essa rota não exige `supplier_id` no proxy atual e usa o secret `ATLAS_API_TOKEN` da Edge Function `atlas-api`.
 
-Configure `ATLAS_API_TOKEN` e `ATLAS_INTEGRATION_SUPPLIER_ID` em **Supabase Dashboard → Edge Functions → Secrets**. Alternativamente, use o CLI autenticado com valores mantidos localmente; nunca coloque os valores reais neste arquivo.
+O token permanece exclusivamente no backend. Não configurar o token em variáveis `VITE_*`, commits ou logs. O proxy exige uma sessão Supabase válida e perfil `administrador` ou `diretoria`.
 
-Não configure esses valores como variáveis `VITE_*`, não os inclua em commits ou chamados de suporte e não use payloads reais em logs.
+A primeira execução percorre todas as páginas e registra apenas a quantidade de objetos e os nomes dos campos retornados, sem exibir dados pessoais nem classificar os objetos como rastreadores ativos. A regra de elegibilidade só será implementada depois de validar a resposta autenticada real e confirmar quais campos indicam vínculo e ativação. Nenhum dado local é criado, atualizado ou excluído nesta etapa.
 
-A consulta percorre todas as páginas de `/integrations/contract_objects/` e, para cada contrato retornado, percorre `/contract/contract_object_product/` e `/contract/contract_object_vehicle/`. O vínculo é feito por IDs de objeto, contrato, produto, veículo e pessoa; a placa não é usada como chave. Um resultado só é mostrado quando o vínculo de produto retorna `activated: true`, o objeto e o contrato retornam status `ATIVO`, e o catálogo apresenta `rastreador`, `rastreamento`, `tracker` ou `tracking` no nome/descrição/código do subproduto. Falhas de página, contagem incompleta ou divergência nos IDs invalidam a consulta inteira.
-
-O endpoint `/softruck/contract_objects/` é documentado como exclusivo para a Softruck e não declara campos de ativação de produto; por isso não é usado para afirmar que um rastreador está ativo. A documentação OpenAPI pública confirma os campos consultados, mas não confirma os valores de catálogo, o `supplier_id` ou a regra comercial da conta MovSat. Antes de usar o resultado operacionalmente, a Mutual Tech ainda deve validar esses dados com uma resposta autenticada sanitizada. Os IDs 283 e 0013 não são fixados.
-
-A comparação com cadastros locais é apenas informativa: usa igualdade exata entre `vehicle_external_id` e `veiculos.id_externo`, sinaliza ausências/duplicidades e mostra o rastreador local associado. Não cria, atualiza nem exclui registros. Associados sem correspondência de veículo por ID externo ficam sem vínculo local. Não há integração financeira nesta etapa.
+A rota geral `/integrations/contract_objects/` continua separada: ela exige `supplier_id` e não deve ser usada enquanto a MovSat não tiver esse identificador confirmado pela Mutual Tech. Integração financeira e operações de escrita permanecem fora do escopo.
