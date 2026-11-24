@@ -312,11 +312,11 @@ export function Associados() {
             </div>
             <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
           </div>
-          {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando todas as páginas da Mutual Tech e conciliando os IDs…</p>}
+          {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando todas as páginas da rota Softruck da Mutual Tech…</p>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
           {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
           {softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rota Softruck respondida: {softruckDiagnostic.count} registros.</p><p className="mt-1 text-xs text-slate-500">Campos retornados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">Esta etapa não classifica rastreadores como ativos; a regra será aplicada somente após validar os campos da resposta real.</p></div>}
-          <div className="overflow-x-auto">
+          {atlasContracts.length > 0 && <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
                 <th className="px-3 py-3">Associado Mutual</th><th className="px-3 py-3">CPF/CNPJ</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato / objeto</th><th className="px-3 py-3">Produto ativo</th><th className="px-3 py-3">Comparação local</th>
@@ -346,8 +346,8 @@ export function Associados() {
                 {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={7}>Nenhum rastreador ativo identificado na consulta completa.</td></tr>}
               </tbody>
             </table>
-          </div>
-          <p className="mt-3 text-xs text-slate-500">A lista só é exibida após todas as páginas e vínculos serem consultados. A conciliação local usa o ID externo do veículo, sem criar ou alterar cadastros.</p>
+          </div>}
+          <p className="mt-3 text-xs text-slate-500">A consulta Softruck é somente leitura. Nenhum cadastro local é criado ou alterado.</p>
         </section>
       )}
 
