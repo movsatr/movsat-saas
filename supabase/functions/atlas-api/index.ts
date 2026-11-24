@@ -159,6 +159,56 @@ Deno.serve(async (req: Request) => {
 
     const incomingUrl = new URL(req.url);
     const resourceName = incomingUrl.searchParams.get("resource") ?? "person";
+
+    if (resourceName === "diagnostics") {
+      const targets = [
+        { name: "softruck_contract_objects", path: "/softruck/contract_objects/" },
+        { name: "contract_object_nested", path: "/contract/contract_object/nested/" },
+        { name: "contract_object", path: "/contract/contract_object/" },
+        { name: "contract_object_product", path: "/contract/contract_object_product/" },
+        { name: "contract_object_vehicle", path: "/contract/contract_object_vehicle/" },
+        { name: "contracts", path: "/contract/" },
+      ];
+      const diagnostics = await Promise.all(targets.map(async (target) => {
+        const url = new URL(`https://atlas-api.mutualignit.com.br/public_api/v2${target.path}`);
+        url.searchParams.set("page", "1");
+        url.searchParams.set("page_size", "100");
+        try {
+          const response = await fetch(url, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+            signal: AbortSignal.timeout(30000),
+          });
+          if (!response.ok) return { resource: target.name, httpStatus: response.status, count: null, pageRows: null, topLevelKeys: [], dataKeys: [], sampleFields: [] };
+          const payload: unknown = await response.json();
+          const root = payload && typeof payload === "object" && !Array.isArray(payload)
+            ? payload as Record<string, unknown> : null;
+          const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
+            ? root.data as Record<string, unknown> : null;
+          const rows = Array.isArray(payload) ? payload
+            : Array.isArray(root?.results) ? root.results
+            : Array.isArray(root?.data) ? root.data
+            : Array.isArray(nested?.results) ? nested.results
+            : Array.isArray(nested?.data) ? nested.data : [];
+          const rawCount = root?.count ?? root?.total ?? nested?.count ?? nested?.total;
+          const first = rows[0] && typeof rows[0] === "object" && !Array.isArray(rows[0])
+            ? rows[0] as Record<string, unknown> : null;
+          return {
+            resource: target.name,
+            httpStatus: response.status,
+            count: rawCount == null ? null : Number(rawCount),
+            pageRows: rows.length,
+            topLevelKeys: root ? Object.keys(root).sort() : [],
+            dataKeys: nested ? Object.keys(nested).sort() : [],
+            sampleFields: first ? Object.keys(first).sort() : [],
+          };
+        } catch (error) {
+          return { resource: target.name, httpStatus: 0, count: null, pageRows: null, topLevelKeys: [], dataKeys: [], sampleFields: [], error: error instanceof Error ? error.name : "unknown" };
+        }
+      }));
+      return jsonResponse(req, 200, { ok: true, resource: "diagnostics", data: { diagnostics } });
+    }
+
     const resource = RESOURCES[resourceName];
 
     if (!resource) {
