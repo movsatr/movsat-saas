@@ -314,7 +314,8 @@ Deno.serve(async (req: Request) => {
               ? productPayload as Record<string, unknown> : null;
             const productNested = productRoot?.data && typeof productRoot.data === "object" && !Array.isArray(productRoot.data)
               ? productRoot.data as Record<string, unknown> : null;
-            const productRows = Array.isArray(productRoot?.results) ? productRoot.results
+            const productRows = Array.isArray(productPayload) ? productPayload
+              : Array.isArray(productRoot?.results) ? productRoot.results
               : Array.isArray(productRoot?.data) ? productRoot.data
               : Array.isArray(productNested?.results) ? productNested.results
               : Array.isArray(productNested?.data) ? productNested.data : [];
