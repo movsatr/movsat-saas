@@ -222,6 +222,11 @@ Deno.serve(async (req: Request) => {
         summarize("contract_object_nested?status=ATIVO", "/contract/contract_object/nested/", { status: "ATIVO" }),
         summarize("contract_object_nested?status=ATIVO&contract_status=ATIVO", "/contract/contract_object/nested/", { status: "ATIVO", contract_status: "ATIVO" }),
       ]);
+      const catalogProductProbes = await Promise.all([
+        summarize("contract_object_product?product_id=13", "/contract/contract_object_product/", { product_id: "13" }),
+        summarize("contract_object_product?product_id=283", "/contract/contract_object_product/", { product_id: "283" }),
+      ]);
+      diagnostics.push(...catalogProductProbes);
       diagnostics.push(...activeStatusProbes);
 
       const sampleUrl = new URL("https://atlas-api.mutualignit.com.br/public_api/v2/contract/contract_object/nested/");
