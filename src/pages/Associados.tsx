@@ -23,6 +23,7 @@ export function Associados() {
   const canSeeFinancial = role === 'diretoria' || role === 'administrador';
 
   const [data, setData] = useState<AssociadoWithRelations[]>([]);
+  const [unassignedVehicles, setUnassignedVehicles] = useState<Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -78,8 +79,20 @@ export function Associados() {
         else { offset += PAGE_SIZE; }
       }
 
+      let localUnassignedVehicles: Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }> = [];
+      if (role === 'administrador' || role === 'diretoria') {
+        const { data: unassigned, error: unassignedError } = await supabase
+          .from('veiculos')
+          .select('id_externo, rastreador:rastreadores(id, imei, status)')
+          .is('associado_id', null)
+          .not('id_externo', 'is', null);
+        if (unassignedError) throw unassignedError;
+        localUnassignedVehicles = (unassigned ?? []) as typeof localUnassignedVehicles;
+      }
+
       if (mountedRef.current) {
         setData(allAssociados);
+        setUnassignedVehicles(localUnassignedVehicles);
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -306,14 +319,16 @@ export function Associados() {
               </tr></thead>
               <tbody>
                 {atlasContracts.map((row) => {
-                  const localMatch = compareWithLocal(row, data);
+                  const localMatch = compareWithLocal(row, data, unassignedVehicles);
                   const localStatus = localMatch.status === 'matched'
                     ? `Já cadastrado: ${localMatch.associateName}${localMatch.trackerStatus ? ` · rastreador local ${localMatch.trackerStatus}` : ' · sem rastreador local'}${localMatch.personMatches === false ? ' · titular divergente' : ''}`
-                    : localMatch.status === 'ambiguous'
-                      ? 'ID externo duplicado nos dados locais'
-                      : localMatch.status === 'missing_external_id'
-                        ? 'Sem ID externo; não conciliável'
-                        : 'Veículo ainda não cadastrado';
+                    : localMatch.status === 'unassigned'
+                      ? `Veículo cadastrado sem associado${localMatch.trackerStatus ? ` · rastreador local ${localMatch.trackerStatus}` : ''}`
+                      : localMatch.status === 'ambiguous'
+                        ? 'ID externo duplicado nos dados locais'
+                        : localMatch.status === 'missing_external_id'
+                          ? 'Sem ID externo; não conciliável'
+                          : 'Veículo ainda não cadastrado';
                   return <tr key={row.id} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="px-3 py-3 font-medium">{row.person.name ?? 'Nome não informado'}</td>
                     <td className="px-3 py-3">{row.person.cpfCnpj ?? '—'}</td>
