@@ -310,7 +310,7 @@ export async function fetchActiveTrackerRecords(query: AtlasQuery): Promise<Acti
     if (vehicleData && hasTrackerProduct && !contractId) {
       throw new Error('A Mutual Tech retornou um objeto com produto rastreador sem ID de contrato; consulta interrompida.');
     }
-    return contractId;
+    return hasTrackerProduct ? contractId : '';
   }).filter(Boolean))];
 
   const contractData = await mapWithConcurrency(contractIds, 4, async (contractId) => {
