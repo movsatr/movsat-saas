@@ -67,7 +67,9 @@ function parsePage(payload: unknown): PageResult {
   }
 
   const nextValue = root?.next ?? nested?.next;
-  const next = nextValue === undefined ? null : nextValue !== false && nextValue !== null && nextValue !== '';
+  const next = nextValue === undefined || nextValue === null || nextValue === ''
+    ? null
+    : nextValue === false ? false : true;
   return { rows, count, next };
 }
 
