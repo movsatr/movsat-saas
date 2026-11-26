@@ -63,7 +63,7 @@ export function Automacao() {
       supabase.from('automation_logs').select('status, duration_ms, error_message, created_at').order('created_at', { ascending: false }),
     ]);
     setRules((r.data || []) as AutomationRule[]);
-    setQueue((q.data || []) as AutomationQueueItem[]);
+    setQueue((s.data || []) as AutomationQueueItem[]);
     setScheduled((scheduledRes.data || []) as ScheduledTask[]);
     setEvents((e.data || []) as EventLog[]);
 
