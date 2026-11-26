@@ -129,7 +129,7 @@ export function Associados() {
         const query = new URLSearchParams(params);
         const response = await fetch(`${baseUrl}?${query.toString()}`, {
           headers,
-          signal: AbortSignal.timeout(35000),
+          signal: AbortSignal.timeout(120000),
         });
         if (!response.ok) {
           let detail = `HTTP ${response.status}`;
