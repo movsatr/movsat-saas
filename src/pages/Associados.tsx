@@ -386,7 +386,7 @@ export function Associados() {
                     <td className="px-3 py-3">{localStatus}</td>
                   </tr>;
                 })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={7}>Nenhum rastreador ativo identificado na consulta completa.</td></tr>}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={7}>A identificação de rastreadores ativos depende da confirmação do vínculo de produto pela Mutual Tech. Esta tela está em modo diagnóstico.</td></tr>}
               </tbody>
             </table>
           </div>}
