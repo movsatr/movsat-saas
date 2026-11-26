@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Zap, Play, Pause, Plus, Pencil, Trash2, Activity, Clock,
   ListChecks, Webhook, Copy, CheckCircle2, XCircle,
@@ -52,7 +52,7 @@ export function Automacao() {
   const [form, setForm] = useState<Partial<AutomationRule>>({});
   const [webhookCopied, setWebhookCopied] = useState(false);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     const [r, q, s, scheduledRes, e, statsRes] = await Promise.all([
       supabase.from('automation_rules').select('*').order('created_at', { ascending: false }),
@@ -81,9 +81,9 @@ export function Automacao() {
     });
 
     setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { void loadAll(); }, [loadAll]);
 
   const handleSave = async () => {
     if (!form.name || !form.trigger) {
