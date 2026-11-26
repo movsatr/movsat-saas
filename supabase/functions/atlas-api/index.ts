@@ -403,9 +403,12 @@ Deno.serve(async (req: Request) => {
           : Array.isArray(root?.results) ? root.results
           : Array.isArray(root?.data) ? root.data
           : Array.isArray(nested?.results) ? nested.results
-          : Array.isArray(nested?.data) ? nested.data : [];
-        return rows.filter((row): row is Record<string, unknown> =>
-          row !== null && typeof row === "object" && !Array.isArray(row));
+          : Array.isArray(nested?.data) ? nested.data : null;
+        if (!rows) throw new Error("atlas_unrecognized_rows_payload");
+        if (!rows.every((row) => row !== null && typeof row === "object" && !Array.isArray(row))) {
+          throw new Error("atlas_invalid_row_shape");
+        }
+        return rows as Record<string, unknown>[];
       };
 
       const requestAtlas = async (path: string, params: Record<string, string>) => {
