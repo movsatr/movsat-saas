@@ -54,10 +54,9 @@ export function Automacao() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [r, q, s, scheduledRes, e, statsRes] = await Promise.all([
+    const [r, s, scheduledRes, e, statsRes] = await Promise.all([
       supabase.from('automation_rules').select('*').order('created_at', { ascending: false }),
-      supabase.from('automation_logs').select('*').order('created_at', { ascending: false }).limit(50),
-      supabase.from('automation_queue').select('*').order('created_at', { ascending: false }).limit(50),
+            supabase.from('automation_queue').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('scheduled_tasks').select('*').order('next_run', { ascending: true }),
       supabase.from('events').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('automation_logs').select('status, duration_ms, error_message, created_at').order('created_at', { ascending: false }),
