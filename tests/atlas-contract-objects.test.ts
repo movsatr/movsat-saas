@@ -276,7 +276,7 @@ test('duplicate objects with conflicting nested contract or person IDs fail clos
   };
   await assert.rejects(
     fetchActiveTrackerRecords(async ({ resource }) => ({
-      count: 2,
+      count: resource === 'softruck_contract_objects' ? 2 : 0,
       results: resource === 'softruck_contract_objects'
         ? [base, { ...base, contract_data: { id: 10, status: 'ATIVO' } }]
         : [],
