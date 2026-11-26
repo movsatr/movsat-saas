@@ -48,7 +48,7 @@ export function Associados() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
@@ -82,7 +82,7 @@ export function Associados() {
         else { offset += PAGE_SIZE; }
       }
 
-      let localUnassignedVehicles: Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }> = [];
+      const localUnassignedVehicles: Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }> = [];
       if (role === 'administrador' || role === 'diretoria') {
         let vehicleOffset = 0;
         while (true) {
@@ -111,7 +111,7 @@ export function Associados() {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  };
+  }, [role]);
 
   const loadAtlasContracts = useCallback(async () => {
     if (role !== 'administrador' && role !== 'diretoria') return;
@@ -168,7 +168,7 @@ export function Associados() {
     }
   }, [role]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(); }, [role, loadAtlasContracts]);
 
   const toggleRow = (id: string) => {
