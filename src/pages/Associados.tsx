@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
-import { compareWithLocal, fetchActiveObjectProductCatalog, type ActiveProductScanResult, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
+import { compareWithLocal, type ActiveProductScanResult, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
 const PAGE_SIZE = 50;
@@ -146,11 +146,27 @@ export function Associados() {
         return payload.data;
       };
 
-      const scan = await fetchActiveObjectProductCatalog(atlasGet, setAtlasProgress);
-      setProductScan(scan);
+      const diagnosticPayload = await atlasGet({ resource: 'diagnostics' }) as {
+        diagnostics?: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }>;
+      };
+      const diagnostics = Array.isArray(diagnosticPayload?.diagnostics) ? diagnosticPayload.diagnostics : [];
+      if (diagnostics.length === 0) throw new Error('A Mutual Tech não retornou o diagnóstico das rotas.');
+      const objectRoute = diagnostics.find((item) => item.resource === 'softruck_contract_objects');
+      const shape = diagnostics.find((item) => item.resource === 'nested_object_shape');
+      setProductScan(null);
       setAtlasContracts([]);
-      setSoftruckDiagnostic(null);
-      setAtlasLastRefresh(scan.complete ? new Date().toISOString() : null);
+      setSoftruckDiagnostic({
+        count: objectRoute?.count ?? 0,
+        fields: shape?.sampleFields ?? [],
+        routes: diagnostics.map((item) => ({
+          resource: item.resource,
+          httpStatus: item.httpStatus,
+          count: item.count,
+          pageRows: item.pageRows,
+          sampleFields: item.sampleFields ?? [],
+        })),
+      });
+      setAtlasLastRefresh(null);
     } catch (error) {
       setAtlasContracts([]);
       setProductScan(null);
@@ -320,9 +336,9 @@ export function Associados() {
                 <Badge color="slate">origem dos dados</Badge>
                 <Badge color="blue">somente leitura</Badge>
               </div>
-              <p className="mt-1 text-sm text-slate-500">Varredura somente leitura de todos os objetos e contratos ativos da Mutual Tech. Primeiro identifica e contabiliza os produtos vinculados; a confirmação de rastreador depende da validação posterior dos vínculos de veículo e titular.</p>
+              <p className="mt-1 text-sm text-slate-500">Etapa 1: comparar as rotas da Atlas/Mutual e validar quais retornam os objetos ativos, seus produtos e os vínculos de veículos. Nenhum dado local é criado ou alterado.</p>
             </div>
-            <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
+            <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Validando…' : 'Validar rotas da Mutual'}</Button>
           </div>
           {atlasLoading && <div className="mb-3 text-sm text-slate-600">
             <p>Varredura em lotes de 50 objetos. {atlasProgress?.page ? `Página ${atlasProgress.page}${atlasProgress.pagesTotal ? ` de ${atlasProgress.pagesTotal}` : ''} · ${atlasProgress.objectsScanned.toLocaleString('pt-BR')} objetos processados` : 'Preparando primeira página…'}</p>
@@ -358,7 +374,7 @@ export function Associados() {
               </table>
             </div>
             <p className="mt-3 text-xs text-slate-500">Esta etapa identifica o catálogo associado aos objetos ativos. Ela não declara quantidade de rastreadores: a confirmação exige cruzar os produtos identificados com ativação, veículo, contrato e titular.</p>
-          </div>}{softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p>{softruckDiagnostic.routes && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="font-medium">Diagnóstico das rotas (somente contagens e nomes de campos)</p>{softruckDiagnostic.routes.map((route) => <div key={route.resource} className="text-xs text-slate-500"><span className="font-medium text-slate-700 dark:text-slate-300">{route.resource}</span>: HTTP {route.httpStatus} · total {route.count ?? 'não informado'} · página {route.pageRows ?? '—'} registros{route.sampleFields.length ? ` · campos: ${route.sampleFields.join(', ')}` : ''}</div>)}</div>}</div>}
+          </div>}{softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Diagnóstico Atlas/Mutual concluído. Esta etapa ainda não representa a contagem final de rastreadores.</p><p className="mt-1 text-xs text-slate-500">Campos encontrados na amostra: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A próxima etapa será usar a rota confirmada para manter somente o produto RASTREADOR ativo.</p>{softruckDiagnostic.routes && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="font-medium">Diagnóstico das rotas (somente contagens e nomes de campos)</p>{softruckDiagnostic.routes.map((route) => <div key={route.resource} className="text-xs text-slate-500"><span className="font-medium text-slate-700 dark:text-slate-300">{route.resource}</span>: HTTP {route.httpStatus} · total {route.count ?? 'não informado'} · página {route.pageRows ?? '—'} registros{route.sampleFields.length ? ` · campos: ${route.sampleFields.join(', ')}` : ''}</div>)}</div>}</div>}
           {atlasContracts.length > 0 && <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
@@ -390,7 +406,7 @@ export function Associados() {
               </tbody>
             </table>
           </div>}
-          <p className="mt-3 text-xs text-slate-500">A consulta Softruck é somente leitura. Nenhum cadastro local é criado ou alterado.</p>
+          <p className="mt-3 text-xs text-slate-500">Consulta à API Atlas/Mutual em modo somente leitura. Nenhum cadastro local é criado ou alterado.</p>
         </section>
       )}
 
