@@ -333,7 +333,7 @@ export function Associados() {
           {productScan && <div className="mb-4 rounded-lg border border-slate-200 p-4 text-sm dark:border-slate-700">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="font-semibold">Varredura de produtos dos objetos ativos</p>
-              <Badge color={productScan.complete ? 'green' : 'amber'}>{productScan.complete ? 'Varredura completa' : 'Incompleta'}</Badge>
+              <Badge color={productScan.complete ? 'green' : 'yellow'}>{productScan.complete ? 'Varredura completa' : 'Incompleta'}</Badge>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
               <div><p className="text-xs text-slate-500">Objetos ativos na base</p><p className="text-lg font-semibold">{productScan.totalActiveObjects?.toLocaleString('pt-BR') ?? '—'}</p></div>
