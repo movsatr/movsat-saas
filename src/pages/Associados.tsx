@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Truck, Satellite, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle2, Circle as XCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
+import { compareWithLocal, fetchActiveObjectProductCatalog, type ActiveProductScanResult, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
 const PAGE_SIZE = 50;
@@ -22,6 +23,7 @@ export function Associados() {
   const canSeeFinancial = role === 'diretoria' || role === 'administrador';
 
   const [data, setData] = useState<AssociadoWithRelations[]>([]);
+  const [unassignedVehicles, setUnassignedVehicles] = useState<Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -33,15 +35,13 @@ export function Associados() {
   const canChangeForm = creating ? canCreate : canEdit;
   const mountedRef = useRef(true);
 
-  const [atlasContracts, setAtlasContracts] = useState<Record<string, unknown>[]>([]);
+  const [atlasContracts, setAtlasContracts] = useState<ActiveTrackerRecord[]>([]);
+  const [productScan, setProductScan] = useState<ActiveProductScanResult | null>(null);
   const [atlasLoading, setAtlasLoading] = useState(false);
+  const [atlasProgress, setAtlasProgress] = useState<{ page: number; pagesTotal: number | null; objectsScanned: number; totalActiveObjects: number | null } | null>(null);
   const [atlasError, setAtlasError] = useState<string | null>(null);
-  const [atlasPage, setAtlasPage] = useState(1);
-  const [atlasCount, setAtlasCount] = useState(0);
-  const [atlasTotalPages, setAtlasTotalPages] = useState(1);
-  const ATLAS_CONTRACTS_PER_PAGE = 50;
-  const ATLAS_PRODUCT_ID = '283';
-  const ATLAS_PROBE_CONCURRENCY = 8;
+  const [atlasLastRefresh, setAtlasLastRefresh] = useState<string | null>(null);
+  const [softruckDiagnostic, setSoftruckDiagnostic] = useState<{ count: number; fields: string[]; routes?: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }> } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -66,7 +66,8 @@ export function Associados() {
               veiculo:veiculos(id, placa, modelo, ano)
             ),
             veiculos:veiculos(
-              id, placa, modelo, ano, rastreador_id, status
+              id, placa, modelo, ano, id_externo, associado_id, rastreador_id, status,
+              rastreador:rastreadores(id, imei, status)
             )
           `)
           .order('nome')
@@ -81,8 +82,27 @@ export function Associados() {
         else { offset += PAGE_SIZE; }
       }
 
+      let localUnassignedVehicles: Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }> = [];
+      if (role === 'administrador' || role === 'diretoria') {
+        let vehicleOffset = 0;
+        while (true) {
+          const { data: unassignedPage, error: unassignedError } = await supabase
+            .from('veiculos')
+            .select('id_externo, rastreador:rastreadores(id, imei, status)')
+            .is('associado_id', null)
+            .not('id_externo', 'is', null)
+            .range(vehicleOffset, vehicleOffset + PAGE_SIZE - 1);
+          if (unassignedError) throw unassignedError;
+          const page = (unassignedPage ?? []) as unknown as typeof localUnassignedVehicles;
+          localUnassignedVehicles.push(...page);
+          if (page.length < PAGE_SIZE) break;
+          vehicleOffset += PAGE_SIZE;
+        }
+      }
+
       if (mountedRef.current) {
         setData(allAssociados);
+        setUnassignedVehicles(localUnassignedVehicles);
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -93,18 +113,19 @@ export function Associados() {
     }
   };
 
-  const loadAtlasContracts = async (page = atlasPage) => {
+  const loadAtlasContracts = useCallback(async () => {
     if (role !== 'administrador' && role !== 'diretoria') return;
     setAtlasLoading(true);
     setAtlasError(null);
+    setAtlasProgress({ page: 0, pagesTotal: null, objectsScanned: 0, totalActiveObjects: null });
     try {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
-      if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente para consultar a Atlas.');
+      if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente para consultar a Mutual Tech.');
       const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
 
-      const atlasGet = async (params: Record<string, string>): Promise<Record<string, unknown> | Record<string, unknown>[]> => {
+      const atlasGet: AtlasQuery = async (params) => {
         const query = new URLSearchParams(params);
         const response = await fetch(`${baseUrl}?${query.toString()}`, {
           headers,
@@ -113,140 +134,42 @@ export function Associados() {
         if (!response.ok) {
           let detail = `HTTP ${response.status}`;
           try {
-            const errorPayload = await response.json();
-            detail = String(errorPayload?.error ?? detail);
+            const errorPayload = await response.json() as { error?: string };
+            detail = errorPayload.error ?? detail;
           } catch { /* resposta não-JSON */ }
-          throw new Error(`Falha na consulta à Atlas: ${detail}`);
+          throw new Error(`Falha na consulta à Mutual Tech: ${detail}`);
         }
-        const payload = await response.json().catch(() => null);
-        if (payload?.ok === false) {
-          throw new Error(String(payload?.error ?? 'Falha na consulta à Atlas.'));
+        const payload = await response.json() as { ok?: boolean; error?: string; data?: unknown };
+        if (payload.ok !== true) {
+          throw new Error(payload.error ?? 'Resposta inválida da Mutual Tech.');
         }
-        return payload?.data as Record<string, unknown> | Record<string, unknown>[];
+        return payload.data;
       };
 
-      // Fluxo validado com a API real: a rota de produtos exige contract_id
-      // (produto sozinho retorna HTTP 400) e o rastreamento é o produto 283.
-      // 1) Contratos ativos paginados; 2) produto 283 dentro de cada contrato
-      // (traz placa/modelo/montadora embutidos); 3) titular via rota de
-      // veículos por placa.
-      const currentPage = Math.max(1, page);
-      const contractsData = await atlasGet({
-        resource: 'contracts',
-        contract_status: 'ATIVO',
-        page: String(currentPage),
-        page_size: String(ATLAS_CONTRACTS_PER_PAGE),
-      });
-      const contracts = (Array.isArray(contractsData)
-        ? contractsData
-        : contractsData?.results ?? []) as Record<string, unknown>[];
-      const contractsTotal = Number(
-        Array.isArray(contractsData) ? contracts.length : contractsData?.count ?? contracts.length
-      );
-      const totalPages = Math.max(1, Math.ceil(
-        (Number.isFinite(contractsTotal) ? contractsTotal : contracts.length) / ATLAS_CONTRACTS_PER_PAGE
-      ));
-      const contractIds = contracts
-        .map((contract) => String(contract.id ?? ''))
-        .filter(Boolean);
-
-      const productRows: Record<string, unknown>[] = [];
-      const failedContracts: string[] = [];
-      for (let offset = 0; offset < contractIds.length; offset += ATLAS_PROBE_CONCURRENCY) {
-        const batch = contractIds.slice(offset, offset + ATLAS_PROBE_CONCURRENCY);
-        const results = await Promise.allSettled(batch.map((contractId) =>
-          atlasGet({
-            resource: 'contract_object_product',
-            contract_id: contractId,
-            product_id: ATLAS_PRODUCT_ID,
-            page: '1',
-            page_size: '10',
-          })
-        ));
-        results.forEach((result, index) => {
-          if (result.status === 'rejected') {
-            failedContracts.push(batch[index]);
-            return;
-          }
-          const data = result.value;
-          const rows = (Array.isArray(data)
-            ? data
-            : data?.results ?? data?.data ?? []) as Record<string, unknown>[];
-          productRows.push(...rows);
-        });
-      }
-
-      const found = await Promise.all(productRows.map(async (row) => {
-        const plate = String(row.plate ?? '');
-        let person: Record<string, unknown> = {};
-        let contract: Record<string, unknown> = {
-          contract_id: row.contract_id ?? '—',
-          contract_status: '—',
-        };
-        if (plate) {
-          try {
-            const vehicleData = await atlasGet({
-              resource: 'contract_object_vehicle',
-              vehicle_plate: plate,
-              page: '1',
-              page_size: '1',
-            });
-            const vehicleRows = (Array.isArray(vehicleData)
-              ? vehicleData
-              : vehicleData?.results ?? []) as Record<string, unknown>[];
-            if (vehicleRows[0]) {
-              person = {
-                id: vehicleRows[0].person_id,
-                name: vehicleRows[0].person_name,
-                cpf_cnpj: vehicleRows[0].person_cpf_cnpj,
-              };
-              contract = {
-                contract_id: vehicleRows[0].contract_id ?? row.contract_id ?? '—',
-                contract_status: vehicleRows[0].contract_status ?? '—',
-              };
-            }
-          } catch {
-            // Titular indisponível não descarta o veículo encontrado.
-          }
-        }
-        return {
-          id: row.object_id ?? `${String(row.contract_id ?? '')}-${plate}`,
-          person_data: person,
-          vehicle_data: { plate, model: row.model, assembler: row.assembler },
-          contract_data: contract,
-          product_code: ATLAS_PRODUCT_ID,
-        };
-      }));
-
-      found.sort((a, b) =>
-        String((a.vehicle_data as Record<string, unknown>).plate).localeCompare(
-          String((b.vehicle_data as Record<string, unknown>).plate)
-        )
-      );
-
-      setAtlasContracts(found);
-      setAtlasPage(currentPage);
-      setAtlasCount(found.length);
-      setAtlasTotalPages(totalPages);
-      if (found.length === 0 && failedContracts.length > 0) {
-        setAtlasError(`Alguns contratos não puderam ser verificados (${failedContracts.slice(0, 3).join(', ')}${failedContracts.length > 3 ? '…' : ''}). Tente atualizar novamente.`);
-      } else {
-        setAtlasError(null);
-      }
+      const scan = await fetchActiveObjectProductCatalog(atlasGet, setAtlasProgress);
+      setProductScan(scan);
+      setAtlasContracts([]);
+      setSoftruckDiagnostic(null);
+      setAtlasLastRefresh(scan.complete ? new Date().toISOString() : null);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Falha ao carregar associados rastreados da Atlas.';
+      setAtlasContracts([]);
+      setProductScan(null);
+      setSoftruckDiagnostic(null);
+      setAtlasLastRefresh(null);
+      const msg = error instanceof Error ? error.message : 'Falha ao consultar os rastreadores ativos da Mutual Tech.';
       if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
-        setAtlasError('Não foi possível conectar à Atlas. Verifique sua internet e tente novamente.');
+        setAtlasError('Não foi possível conectar à Mutual Tech. Verifique sua internet e tente novamente.');
       } else {
         setAtlasError(msg);
       }
     } finally {
       setAtlasLoading(false);
+      setAtlasProgress(null);
     }
-  };
+  }, [role]);
 
   useEffect(() => { loadData(); }, []);
-  useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(1); }, [role]);
+  useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(); }, [role, loadAtlasContracts]);
 
   const toggleRow = (id: string) => {
     setExpandedRows((prev) => {
@@ -397,56 +320,77 @@ export function Associados() {
                 <Badge color="slate">origem dos dados</Badge>
                 <Badge color="blue">somente leitura</Badge>
               </div>
-              <p className="mt-1 text-sm text-slate-500">Veículos com o produto RASTREADOR (ID 283) nos contratos ativos da Atlas. Não altera os cadastros do MovSat.</p>
+              <p className="mt-1 text-sm text-slate-500">Varredura somente leitura de todos os objetos e contratos ativos da Mutual Tech. Primeiro identifica e contabiliza os produtos vinculados; a confirmação de rastreador depende da validação posterior dos vínculos de veículo e titular.</p>
             </div>
-            <Button variant="secondary" onClick={() => loadAtlasContracts(atlasError ? Math.min(atlasPage + 1, atlasTotalPages) : 1)} disabled={atlasLoading || (Boolean(atlasError) && atlasPage >= atlasTotalPages)}>{atlasLoading ? 'Buscando…' : atlasError ? 'Buscar próxima página' : 'Atualizar'}</Button>
+            <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
           </div>
-          {atlasLoading && <p className="mb-3 text-sm text-slate-500">Consultando a Atlas…</p>}
+          {atlasLoading && <div className="mb-3 text-sm text-slate-600">
+            <p>Varredura em lotes de 50 objetos. {atlasProgress?.page ? `Página ${atlasProgress.page}${atlasProgress.pagesTotal ? ` de ${atlasProgress.pagesTotal}` : ''} · ${atlasProgress.objectsScanned.toLocaleString('pt-BR')} objetos processados` : 'Preparando primeira página…'}</p>
+            {atlasProgress?.totalActiveObjects && <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.min(100, atlasProgress.objectsScanned / atlasProgress.totalActiveObjects * 100)}%` }} /></div>}
+          </div>}
           {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
-          {!atlasError && atlasContracts.length > 0 && (
-            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Veículos com produto 283 (rastreador) nesta página de contratos</p>
-                <p className="mt-1 text-xl font-semibold">{atlasCount.toLocaleString('pt-BR')}</p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Associados distintos na Atlas</p>
-                <p className="mt-1 text-xl font-semibold">{new Set(atlasContracts.map((row) => (row.person_data ?? {}) as Record<string, unknown>).map((person) => String(person.id ?? person.cpf_cnpj ?? person.name ?? '')).filter(Boolean)).size}</p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                <p className="text-xs text-slate-500">Veículos com placa</p>
-                <p className="mt-1 text-xl font-semibold">{atlasContracts.filter((row) => Boolean(((row.vehicle_data ?? {}) as Record<string, unknown>).plate)).length}</p>
-              </div>
+          {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
+          {productScan && <div className="mb-4 rounded-lg border border-slate-200 p-4 text-sm dark:border-slate-700">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-semibold">Varredura de produtos dos objetos ativos</p>
+              <Badge color={productScan.complete ? 'green' : 'yellow'}>{productScan.complete ? 'Varredura completa' : 'Incompleta'}</Badge>
             </div>
-          )}
-          <div className="overflow-x-auto">
+            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div><p className="text-xs text-slate-500">Objetos ativos na base</p><p className="text-lg font-semibold">{productScan.totalActiveObjects?.toLocaleString('pt-BR') ?? '—'}</p></div>
+              <div><p className="text-xs text-slate-500">Objetos consultados</p><p className="text-lg font-semibold">{productScan.objectsScanned.toLocaleString('pt-BR')}</p></div>
+              <div><p className="text-xs text-slate-500">Vínculos de produto</p><p className="text-lg font-semibold">{productScan.productRowsScanned.toLocaleString('pt-BR')}</p></div>
+              <div><p className="text-xs text-slate-500">Páginas percorridas</p><p className="text-lg font-semibold">{productScan.pagesScanned.toLocaleString('pt-BR')}</p></div>
+            </div>
+            {productScan.failedObjects > 0 && <p className="mt-2 text-sm text-red-600">{productScan.failedObjects} objetos tiveram falha na consulta. O resultado não pode ser considerado conclusivo.</p>}
+            {productScan.countChangedDuringScan && <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">A Mutual alterou a contagem durante a consulta (inicial: {productScan.totalActiveObjects?.toLocaleString('pt-BR') ?? '—'}; última leitura: {productScan.latestReportedTotal?.toLocaleString('pt-BR') ?? '—'}). Os dados foram preservados, mas esta execução não será marcada como conclusiva.</p>}
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead><tr className="border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700"><th className="py-2 pr-3">ID produto</th><th className="py-2 pr-3">Produto / descrição</th><th className="py-2 pr-3">Código fornecedor</th><th className="py-2 pr-3">Vínculos</th><th className="py-2 pr-3">Ativados</th><th className="py-2">Excluídos</th></tr></thead>
+                <tbody>{productScan.products.map((product) => <tr key={[product.productId, product.name, product.description, product.supplierCode].join('|')} className="border-b border-slate-100 dark:border-slate-800">
+                  <td className="py-2 pr-3 font-mono">{product.productId}</td>
+                  <td className="py-2 pr-3"><span className="font-medium">{product.name}</span>{product.description && <span className="block text-xs text-slate-500">{product.description}</span>}</td>
+                  <td className="py-2 pr-3">{product.supplierCode || '—'}</td>
+                  <td className="py-2 pr-3 tabular-nums">{product.occurrences.toLocaleString('pt-BR')}</td>
+                  <td className="py-2 pr-3 tabular-nums">{product.activated.toLocaleString('pt-BR')}</td>
+                  <td className="py-2 tabular-nums">{product.deleted.toLocaleString('pt-BR')}</td>
+                </tr>)}
+                {productScan.products.length === 0 && <tr><td colSpan={6} className="py-5 text-center text-slate-500">Nenhum vínculo de produto retornado nas páginas consultadas.</td></tr>}</tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Esta etapa identifica o catálogo associado aos objetos ativos. Ela não declara quantidade de rastreadores: a confirmação exige cruzar os produtos identificados com ativação, veículo, contrato e titular.</p>
+          </div>}{softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p>{softruckDiagnostic.routes && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="font-medium">Diagnóstico das rotas (somente contagens e nomes de campos)</p>{softruckDiagnostic.routes.map((route) => <div key={route.resource} className="text-xs text-slate-500"><span className="font-medium text-slate-700 dark:text-slate-300">{route.resource}</span>: HTTP {route.httpStatus} · total {route.count ?? 'não informado'} · página {route.pageRows ?? '—'} registros{route.sampleFields.length ? ` · campos: ${route.sampleFields.join(', ')}` : ''}</div>)}</div>}</div>}
+          {atlasContracts.length > 0 && <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                <th className="px-3 py-3">Associado</th><th className="px-3 py-3">CPF/CNPJ</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato</th><th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Associado Mutual</th><th className="px-3 py-3">CPF/CNPJ</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato / objeto</th><th className="px-3 py-3">Produto ativo</th><th className="px-3 py-3">Comparação local</th>
               </tr></thead>
               <tbody>
-                {atlasContracts.map((row, index) => {
-                  const person = (row.person_data ?? {}) as Record<string, unknown>;
-                  const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
-                  const contract = (row.contract_data ?? {}) as Record<string, unknown>;
-                  return <tr key={String(row.id ?? index)} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="px-3 py-3 font-medium">{String(person.name ?? 'Nome não informado pela API')}</td>
-                    <td className="px-3 py-3">{String(person.cpf_cnpj ?? '—')}</td>
-                    <td className="px-3 py-3 font-mono">{String(vehicle.plate ?? '—')}</td>
-                    <td className="px-3 py-3">{[vehicle.assembler, vehicle.model].filter(Boolean).join(' ') || '—'}</td>
-                    <td className="px-3 py-3">{String(contract.contract_id ?? '—')}</td>
-                    <td className="px-3 py-3">{String(contract.contract_status ?? '—')}</td>
+                {atlasContracts.map((row) => {
+                  const localMatch = compareWithLocal(row, data, unassignedVehicles);
+                  const localStatus = localMatch.status === 'matched'
+                    ? `Já cadastrado: ${localMatch.associateName}${localMatch.trackerStatus ? ` · rastreador local ${localMatch.trackerStatus}` : ' · sem rastreador local'}${localMatch.personMatches === false ? ' · titular divergente' : ''}`
+                    : localMatch.status === 'unassigned'
+                      ? `Veículo cadastrado sem associado${localMatch.trackerStatus ? ` · rastreador local ${localMatch.trackerStatus}` : ''}`
+                      : localMatch.status === 'ambiguous'
+                        ? 'ID externo duplicado nos dados locais'
+                        : localMatch.status === 'missing_external_id'
+                          ? 'Sem ID externo; não conciliável'
+                          : 'Veículo ainda não cadastrado';
+                  return <tr key={row.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="px-3 py-3 font-medium">{row.person.name ?? 'Nome não informado'}</td>
+                    <td className="px-3 py-3">{row.person.cpfCnpj ?? '—'}</td>
+                    <td className="px-3 py-3 font-mono">{row.vehicle.plate ?? '—'}</td>
+                    <td className="px-3 py-3">{[row.vehicle.assembler, row.vehicle.model].filter(Boolean).join(' ') || '—'}</td>
+                    <td className="px-3 py-3">{row.contract.id} / {row.id}</td>
+                    <td className="px-3 py-3">{row.product.name} · ativo</td>
+                    <td className="px-3 py-3">{localStatus}</td>
                   </tr>;
                 })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>Nenhum veículo com o produto rastreador (283) nos contratos desta página.</td></tr>}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={7}>A identificação de rastreadores ativos depende da confirmação do vínculo de produto pela Mutual Tech. Esta tela está em modo diagnóstico.</td></tr>}
               </tbody>
             </table>
-          </div>
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <Button variant="secondary" disabled={atlasLoading || atlasPage <= 1} onClick={() => loadAtlasContracts(atlasPage - 1)}>Anterior</Button>
-            <span className="text-xs text-slate-500">Página {atlasPage} de {atlasTotalPages} de contratos ativos — veículos com produto 283</span>
-            <Button variant="secondary" disabled={atlasLoading || atlasPage >= atlasTotalPages} onClick={() => loadAtlasContracts(atlasPage + 1)}>Próxima</Button>
-          </div>
+          </div>}
+          <p className="mt-3 text-xs text-slate-500">A consulta Softruck é somente leitura. Nenhum cadastro local é criado ou alterado.</p>
         </section>
       )}
 

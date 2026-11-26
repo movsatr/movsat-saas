@@ -3,6 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const ALLOWED_ORIGINS = new Set([
   "https://movsat-saas.vercel.app",
   "https://movsat-saas-6v5hmpbk9-mov4.vercel.app",
+  "https://movsat-saas-fa17s2r8b-mov4.vercel.app",
+  "https://movsat-saas-git-movsatr-integrar-associados-rastrea-25a551-mov4.vercel.app",
   "http://localhost:5173",
 ]);
 
@@ -29,7 +31,7 @@ const RESOURCES: Record<string, { path: string; params: string[] }> = {
   },
   integrations_contract_objects: {
     path: "/integrations/contract_objects/",
-    params: ["id", "contract_id", "vehicle_id", "object_type", "contract_status", "implemento_id", "vehicle_chassi", "vehicle_renavam", "vehicle_plate", "person_id", "person_cpf_cnpj", "page", "page_size", "supplier_id"],
+    params: ["id", "contract_id", "vehicle_id", "object_type", "contract_status", "implemento_id", "vehicle_chassi", "vehicle_renavam", "vehicle_plate", "person_id", "person_cpf_cnpj", "page", "page_size"],
   },
   softruck_contract_objects: {
     path: "/softruck/contract_objects/",
@@ -86,7 +88,9 @@ function corsHeaders(req: Request): Headers {
   });
 
   const origin = req.headers.get("Origin");
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
+  const isMovSatPreviewOrigin = origin !== null &&
+    /^https:\/\/movsat-saas-[a-z0-9-]+-mov4\.vercel\.app$/i.test(origin);
+  if (origin && (ALLOWED_ORIGINS.has(origin) || isMovSatPreviewOrigin)) {
     headers.set("Access-Control-Allow-Origin", origin);
   }
   return headers;
@@ -155,6 +159,387 @@ Deno.serve(async (req: Request) => {
 
     const incomingUrl = new URL(req.url);
     const resourceName = incomingUrl.searchParams.get("resource") ?? "person";
+
+    if (resourceName === "diagnostics") {
+      const targets = [
+        { name: "softruck_contract_objects", path: "/softruck/contract_objects/" },
+        { name: "contract_object_nested", path: "/contract/contract_object/nested/" },
+        { name: "contract_object", path: "/contract/contract_object/" },
+        { name: "contract_object_product", path: "/contract/contract_object_product/" },
+        { name: "contract_object_vehicle", path: "/contract/contract_object_vehicle/" },
+        { name: "contracts", path: "/contract/" },
+      ];
+      const summarize = async (name: string, path: string, params: Record<string, string> = {}) => {
+        const url = new URL(`https://atlas-api.mutualignit.com.br/public_api/v2${path}`);
+        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+        url.searchParams.set("page", "1");
+        url.searchParams.set("page_size", "100");
+        try {
+          const response = await fetch(url, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+            signal: AbortSignal.timeout(30000),
+          });
+          const body = await response.text();
+          let payload: unknown = null;
+          try { payload = JSON.parse(body); } catch { /* no JSON body */ }
+          const root = payload && typeof payload === "object" && !Array.isArray(payload)
+            ? payload as Record<string, unknown> : null;
+          const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
+            ? root.data as Record<string, unknown> : null;
+          const rows = Array.isArray(payload) ? payload
+            : Array.isArray(root?.results) ? root.results
+            : Array.isArray(root?.data) ? root.data
+            : Array.isArray(nested?.results) ? nested.results
+            : Array.isArray(nested?.data) ? nested.data : [];
+          const rawCount = root?.count ?? root?.total ?? nested?.count ?? nested?.total;
+          const first = rows[0] && typeof rows[0] === "object" && !Array.isArray(rows[0])
+            ? rows[0] as Record<string, unknown> : null;
+          const errorHint = !response.ok && root
+            ? [root.detail, root.error, root.message].find((value) => typeof value === "string") as string | undefined
+            : undefined;
+          return {
+            resource: name,
+            httpStatus: response.status,
+            count: rawCount == null ? null : Number(rawCount),
+            pageRows: rows.length,
+            topLevelKeys: root ? Object.keys(root).sort() : [],
+            dataKeys: nested ? Object.keys(nested).sort() : [],
+            sampleFields: first ? Object.keys(first).sort() : [],
+            ...(errorHint ? { errorHint: errorHint.slice(0, 240) } : {}),
+          };
+        } catch (error) {
+          return { resource: name, httpStatus: 0, count: null, pageRows: null, topLevelKeys: [], dataKeys: [], sampleFields: [], errorHint: error instanceof Error ? error.name : "unknown" };
+        }
+      };
+
+      const diagnostics = await Promise.all(targets.map((target) =>
+        summarize(target.name, target.path)
+      ));
+
+      const activeStatusProbes = await Promise.all([
+        summarize("contract_object_nested?contract_status=ATIVO", "/contract/contract_object/nested/", { contract_status: "ATIVO" }),
+        summarize("contract_object_nested?status=ATIVO", "/contract/contract_object/nested/", { status: "ATIVO" }),
+        summarize("contract_object_nested?status=ATIVO&contract_status=ATIVO", "/contract/contract_object/nested/", { status: "ATIVO", contract_status: "ATIVO" }),
+      ]);
+      const catalogProductProbes = await Promise.all([
+        summarize("contract_object_product?product_id=13", "/contract/contract_object_product/", { product_id: "13" }),
+        summarize("contract_object_product?product_id=283", "/contract/contract_object_product/", { product_id: "283" }),
+      ]);
+      diagnostics.push(...catalogProductProbes);
+      diagnostics.push(...activeStatusProbes);
+
+      const sampleUrl = new URL("https://atlas-api.mutualignit.com.br/public_api/v2/contract/contract_object/nested/");
+      sampleUrl.searchParams.set("status", "ATIVO");
+      sampleUrl.searchParams.set("contract_status", "ATIVO");
+      sampleUrl.searchParams.set("page", "1");
+      sampleUrl.searchParams.set("page_size", "1");
+      let sampleObject: Record<string, unknown> | null = null;
+      let sampleRootKeys: string[] = [];
+      let sampleDataKeys: string[] = [];
+      try {
+        const sampleResponse = await fetch(sampleUrl, {
+          headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+          signal: AbortSignal.timeout(30000),
+        });
+        const samplePayload = await sampleResponse.json();
+        const root = samplePayload && typeof samplePayload === "object" && !Array.isArray(samplePayload)
+          ? samplePayload as Record<string, unknown> : null;
+        const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
+          ? root.data as Record<string, unknown> : null;
+        sampleRootKeys = root ? Object.keys(root).sort() : [];
+        sampleDataKeys = nested ? Object.keys(nested).sort() : [];
+        const rows = Array.isArray(root?.results) ? root.results
+          : Array.isArray(root?.data) ? root.data
+          : Array.isArray(nested?.results) ? nested.results
+          : Array.isArray(nested?.data) ? nested.data : [];
+        sampleObject = rows[0] && typeof rows[0] === "object" && !Array.isArray(rows[0])
+          ? rows[0] as Record<string, unknown> : null;
+      } catch { /* base route diagnostic already reports transport status */ }
+
+      if (sampleObject) {
+        const objectId = typeof sampleObject.id === "string" || typeof sampleObject.id === "number"
+          ? String(sampleObject.id) : "";
+        const contractId = typeof sampleObject.contract_id === "string" || typeof sampleObject.contract_id === "number"
+          ? String(sampleObject.contract_id) : "";
+        const probes = [
+          ...(objectId ? [{ key: "object_id", value: objectId }] : []),
+          ...(objectId ? [{ key: "contract_object_id", value: objectId }] : []),
+          ...(contractId ? [{ key: "contract_id", value: contractId }] : []),
+        ];
+        const productProbes = await Promise.all(probes.map((probe) =>
+          summarize(`contract_object_product?filter=${probe.key}`, "/contract/contract_object_product/", { [probe.key]: probe.value })
+        ));
+        diagnostics.push(...productProbes);
+        if (contractId) {
+          const productIdProbes = await Promise.all(["13", "283"].flatMap((productId) => [
+            summarize(`contract_object_product?contract_id+product_id=${productId}`, "/contract/contract_object_product/", { contract_id: contractId, product_id: productId }),
+            summarize(`contract_object_product?contract_object_id+product_id=${productId}`, "/contract/contract_object_product/", { contract_object_id: objectId, product_id: productId }),
+          ]));
+          diagnostics.push(...productIdProbes);
+        }
+
+        const nestedFields = (key: string) => {
+          const value = sampleObject?.[key];
+          return value && typeof value === "object" && !Array.isArray(value)
+            ? Object.keys(value as Record<string, unknown>).sort().map((field) => `${key}.${field}`)
+            : [];
+        };
+        const implementos = sampleObject.implementos_data;
+        diagnostics.push({
+          resource: "nested_object_shape",
+          httpStatus: 200,
+          count: null,
+          pageRows: null,
+          topLevelKeys: [],
+          dataKeys: [],
+          sampleFields: [
+            ...nestedFields("person_data"),
+            ...nestedFields("vehicle_data"),
+            ...nestedFields("contract_data"),
+            `status=${String(sampleObject.status ?? "missing")}`,
+            `contract_status=${String(sampleObject.contract_status ?? "missing")}`,
+            `sample_root_keys=${sampleRootKeys.join(",") || "none"}`,
+            `sample_data_keys=${sampleDataKeys.join(",") || "none"}`,
+            `deleted_type=${sampleObject.deleted === undefined ? "missing" : typeof sampleObject.deleted}`,
+            `implementos_data_type=${Array.isArray(implementos) ? "array" : implementos === null ? "null" : typeof implementos}`,
+            ...(Array.isArray(implementos) ? [`implementos_data_length=${implementos.length}`] : []),
+            ...(implementos && typeof implementos === "object" && !Array.isArray(implementos)
+              ? Object.keys(implementos as Record<string, unknown>).map((key) => `implementos_data.${key}`) : []),
+            `implementos_ids_type=${Array.isArray(sampleObject.implementos_ids) ? "array" : typeof sampleObject.implementos_ids}`,
+            ...(Array.isArray(sampleObject.implementos_ids) ? [`implementos_ids_length=${sampleObject.implementos_ids.length}`] : []),
+          ],
+        });
+
+        if (objectId) {
+          const productUrl = new URL("https://atlas-api.mutualignit.com.br/public_api/v2/contract/contract_object_product/");
+          productUrl.searchParams.set("contract_object_id", objectId);
+          productUrl.searchParams.set("page", "1");
+          productUrl.searchParams.set("page_size", "10");
+          try {
+            const productResponse = await fetch(productUrl, {
+              headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+              signal: AbortSignal.timeout(30000),
+            });
+            const productPayload: unknown = await productResponse.json();
+            const productRoot = productPayload && typeof productPayload === "object" && !Array.isArray(productPayload)
+              ? productPayload as Record<string, unknown> : null;
+            const productNested = productRoot?.data && typeof productRoot.data === "object" && !Array.isArray(productRoot.data)
+              ? productRoot.data as Record<string, unknown> : null;
+            const productRows = Array.isArray(productPayload) ? productPayload
+              : Array.isArray(productRoot?.results) ? productRoot.results
+              : Array.isArray(productRoot?.data) ? productRoot.data
+              : Array.isArray(productNested?.results) ? productNested.results
+              : Array.isArray(productNested?.data) ? productNested.data : [];
+            const firstProductRow = productRows[0] && typeof productRows[0] === "object" && !Array.isArray(productRows[0])
+              ? productRows[0] as Record<string, unknown> : null;
+            const products = Array.isArray(firstProductRow?.products) ? firstProductRow.products : [];
+            const firstProduct = products[0] && typeof products[0] === "object" && !Array.isArray(products[0])
+              ? products[0] as Record<string, unknown> : null;
+            diagnostics.push({
+              resource: "product_nested_shape",
+              httpStatus: productResponse.status,
+              count: null,
+              pageRows: productRows.length,
+              topLevelKeys: productRoot ? Object.keys(productRoot).sort() : [],
+              dataKeys: productNested ? Object.keys(productNested).sort() : [],
+              sampleFields: [
+                ...(firstProductRow ? Object.keys(firstProductRow).sort().map((key) => `row.${key}`) : []),
+                `products_type=${Array.isArray(firstProductRow?.products) ? "array" : typeof firstProductRow?.products}`,
+                `products_length=${products.length}`,
+                `product_root_keys=${productRoot ? Object.keys(productRoot).sort().join(",") : "none"}`,
+            `product_data_type=${Array.isArray(productRoot?.data) ? "array" : productRoot?.data === undefined ? "missing" : typeof productRoot?.data}`,
+            `product_data_keys=${productNested ? Object.keys(productNested).sort().join(",") : "none"}`,
+            ...(firstProduct ? Object.keys(firstProduct).sort().map((key) => `products[0].${key}`) : []),
+                ...(firstProduct ? ["activated", "deleted", "status", "product_name", "subproduct_description", "subproduct_supplier_code"]
+                  .filter((key) => firstProduct[key] !== undefined)
+                  .map((key) => `${key}=${typeof firstProduct[key] === "string" || typeof firstProduct[key] === "boolean" || typeof firstProduct[key] === "number" ? String(firstProduct[key]) : Array.isArray(firstProduct[key]) ? "array" : typeof firstProduct[key]}`) : []),
+                ...[...new Set(products.map((item) =>
+                  item && typeof item === "object" && !Array.isArray(item) &&
+                  typeof (item as Record<string, unknown>).product_name === "string"
+                    ? String((item as Record<string, unknown>).product_name) : ""
+                ).filter(Boolean))].map((name) => `catalog_product_name=${name}`),
+                ...products.flatMap((item) => {
+                  if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+                  const product = item as Record<string, unknown>;
+                  return typeof product.product_id === "string" || typeof product.product_id === "number"
+                    ? [`catalog_product=${String(product.product_id)}:${String(product.product_name ?? "sem nome")}`] : [];
+                }),
+              ],
+            });
+          } catch (error) {
+            diagnostics.push({
+              resource: "product_nested_shape",
+              httpStatus: 0,
+              count: null,
+              pageRows: null,
+              topLevelKeys: [],
+              dataKeys: [],
+              sampleFields: [error instanceof Error ? error.name : "unknown"],
+            });
+          }
+        }
+      }
+      return jsonResponse(req, 200, { ok: true, resource: "diagnostics", data: { diagnostics } });
+    }
+
+
+    if (resourceName === "active_product_scan") {
+      const page = Number(incomingUrl.searchParams.get("page") ?? "1");
+      const pageSize = Number(incomingUrl.searchParams.get("page_size") ?? "100");
+      const requestedExpectedTotal = incomingUrl.searchParams.get("expected_total");
+      const expectedTotalInput = requestedExpectedTotal === null ? null : Number(requestedExpectedTotal);
+      if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100 ||
+          (expectedTotalInput !== null && (!Number.isSafeInteger(expectedTotalInput) || expectedTotalInput < 0))) {
+        return jsonResponse(req, 400, { error: "invalid_pagination" });
+      }
+
+      const extractRows = (payload: unknown): Record<string, unknown>[] => {
+        const root = payload && typeof payload === "object" && !Array.isArray(payload)
+          ? payload as Record<string, unknown> : null;
+        const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data)
+          ? root.data as Record<string, unknown> : null;
+        const rows = Array.isArray(payload) ? payload
+          : Array.isArray(root?.results) ? root.results
+          : Array.isArray(root?.data) ? root.data
+          : Array.isArray(nested?.results) ? nested.results
+          : Array.isArray(nested?.data) ? nested.data : null;
+        if (!rows) throw new Error("atlas_unrecognized_rows_payload");
+        if (!rows.every((row) => row !== null && typeof row === "object" && !Array.isArray(row))) {
+          throw new Error("atlas_invalid_row_shape");
+        }
+        return rows as Record<string, unknown>[];
+      };
+
+      const requestAtlas = async (path: string, params: Record<string, string>) => {
+        const url = new URL(`https://atlas-api.mutualignit.com.br/public_api/v2${path}`);
+        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+        let lastError = "atlas_request_failed";
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const response = await fetch(url, {
+              headers: { Authorization: `Bearer ${atlasToken}`, Accept: "application/json" },
+              signal: AbortSignal.timeout(25000),
+            });
+            const body = await response.text();
+            let payload: unknown = null;
+            try { payload = JSON.parse(body); } catch { /* validated below */ }
+            if (response.ok && payload !== null) return payload;
+            lastError = response.ok ? "atlas_invalid_json" : `atlas_http_${response.status}`;
+            if (![429, 500, 502, 503, 504].includes(response.status)) break;
+          } catch (error) {
+            lastError = error instanceof Error ? error.name : "atlas_request_failed";
+          }
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+        }
+        throw new Error(lastError);
+      };
+
+      const objectPayload = await requestAtlas("/contract/contract_object/nested/", {
+        status: "ATIVO",
+        contract_status: "ATIVO",
+        page: String(page),
+        page_size: String(pageSize),
+      });
+      const objects = extractRows(objectPayload);
+      const objectRoot = objectPayload && typeof objectPayload === "object" && !Array.isArray(objectPayload)
+        ? objectPayload as Record<string, unknown> : null;
+      const objectNested = objectRoot?.data && typeof objectRoot.data === "object" && !Array.isArray(objectRoot.data)
+        ? objectRoot.data as Record<string, unknown> : null;
+      const rawTotal = objectRoot?.count ?? objectRoot?.total ?? objectNested?.count ?? objectNested?.total;
+      const reportedTotal = rawTotal == null ? null : Number(rawTotal);
+      if (reportedTotal !== null && (!Number.isSafeInteger(reportedTotal) || reportedTotal < 0)) {
+        return jsonResponse(req, 502, { error: "atlas_invalid_total" });
+      }
+      // A contagem pode oscilar durante a paginação. Mantemos a primeira
+      // contagem como alvo e reportamos alterações sem encerrar cedo.
+      const expectedTotal = expectedTotalInput ?? reportedTotal;
+      const totalChanged = expectedTotal !== null && reportedTotal !== null && expectedTotal !== reportedTotal;
+
+      const productCounts = new Map<string, { productId: string; name: string; description: string; supplierCode: string; occurrences: number; activated: number; deleted: number }>();
+      let objectsScanned = 0;
+      let productRowsScanned = 0;
+      let failedObjects = 0;
+      let nextIndex = 0;
+      let embeddedProductsUsed = 0;
+      let productEndpointRequests = 0;
+      // Aproveita produtos já embutidos no retorno nested e consulta o endpoint
+      // individual somente quando a API não entregar esse bloco.
+      const workers = Array.from({ length: Math.min(10, objects.length) }, async () => {
+        while (true) {
+          const index = nextIndex++;
+          if (index >= objects.length) return;
+          const object = objects[index];
+          const objectId = object.id == null ? "" : String(object.id);
+          if (!objectId) { failedObjects++; continue; }
+          try {
+            let productRows: Record<string, unknown>[];
+            if (Array.isArray(object.products_data)) {
+              embeddedProductsUsed++;
+              productRows = [{ products: object.products_data }];
+            } else {
+              productEndpointRequests++;
+              const productPayload = await requestAtlas("/contract/contract_object_product/", {
+                contract_object_id: objectId,
+                page: "1",
+                page_size: "100",
+              });
+              productRows = extractRows(productPayload);
+            }
+            objectsScanned++;
+            for (const row of productRows) {
+              const nestedProducts = Array.isArray(row.products) ? row.products.filter((item) =>
+                item !== null && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown>[] : [];
+              const candidates = nestedProducts.length ? nestedProducts : [row];
+              productRowsScanned += candidates.length;
+              for (const product of candidates) {
+                const rawId = product.product_id ?? product.id;
+                const productId = rawId == null ? "sem_id" : String(rawId);
+                const name = String(product.product_name ?? product.name ?? "Nome não informado");
+                const description = String(product.subproduct_description ?? "");
+                const supplierCode = String(product.subproduct_supplier_code ?? "");
+                const key = [productId, name, description, supplierCode].join("|");
+                const aggregate = productCounts.get(key) ?? {
+                  productId, name, description, supplierCode, occurrences: 0, activated: 0, deleted: 0,
+                };
+                aggregate.occurrences++;
+                if (product.activated === true) aggregate.activated++;
+                if (product.deleted === true) aggregate.deleted++;
+                productCounts.set(key, aggregate);
+              }
+            }
+          } catch {
+            failedObjects++;
+          }
+        }
+      });
+      await Promise.all(workers);
+
+      const products = [...productCounts.values()].sort((a, b) =>
+        b.occurrences - a.occurrences || a.productId.localeCompare(b.productId));
+      return jsonResponse(req, 200, {
+        ok: true,
+        resource: "active_product_scan",
+        data: {
+          page,
+          pageSize,
+          totalActiveObjects: expectedTotal,
+          reportedTotalActiveObjects: reportedTotal,
+          totalChanged,
+          pageObjects: objects.length,
+          objectsScanned,
+          failedObjects,
+          productRowsScanned,
+          embeddedProductsUsed,
+          productEndpointRequests,
+          effectiveConcurrency: Math.min(10, objects.length),
+          products,
+          pageComplete: failedObjects === 0 && objectsScanned === objects.length,
+          hasMore: expectedTotal === null ? objects.length === pageSize : page * pageSize < expectedTotal,
+        },
+      });
+    }
+
     const resource = RESOURCES[resourceName];
 
     if (!resource) {
@@ -162,6 +547,13 @@ Deno.serve(async (req: Request) => {
         error: "invalid_resource",
         allowed: Object.keys(RESOURCES),
       });
+    }
+
+    const integrationSupplierId = resourceName === "integrations_contract_objects"
+      ? Deno.env.get("ATLAS_INTEGRATION_SUPPLIER_ID")
+      : null;
+    if (resourceName === "integrations_contract_objects" && !integrationSupplierId) {
+      return jsonResponse(req, 500, { error: "integration_supplier_not_configured" });
     }
 
     const upstreamUrl = new URL(
@@ -172,6 +564,9 @@ Deno.serve(async (req: Request) => {
       for (const value of incomingUrl.searchParams.getAll(param)) {
         upstreamUrl.searchParams.append(param, value);
       }
+    }
+    if (integrationSupplierId) {
+      upstreamUrl.searchParams.set("supplier_id", integrationSupplierId);
     }
 
     let upstream: Response;
@@ -189,9 +584,7 @@ Deno.serve(async (req: Request) => {
       const isTimeout = err.name === "TimeoutError" || err.name === "AbortError";
       console.error("Atlas upstream fetch failed", JSON.stringify({
         resource: resourceName,
-        path: resource.path,
         errorName: err.name,
-        errorMessage: err.message,
         isTimeout,
       }));
       return jsonResponse(req, 502, {
@@ -201,15 +594,12 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!upstream.ok) {
-      const upstreamErrorBody = (await upstream.clone().text()).slice(0, 800);
       console.error("Falha na API Atlas", JSON.stringify({
         resource: resourceName,
-        path: resource.path,
         status: upstream.status,
-        responseBody: upstreamErrorBody,
       }));
       return jsonResponse(req, 502, {
-        error: `atlas_request_failed (HTTP ${upstream.status}): ${upstreamErrorBody || "sem detalhe retornado"}`,
+        error: "atlas_request_failed",
         atlas_status: upstream.status,
       });
     }
@@ -223,30 +613,13 @@ Deno.serve(async (req: Request) => {
 
     try {
       const data = JSON.parse(body);
-      if (resourceName === "softruck_contract_objects") {
-        const obj = data && typeof data === "object" ? data as Record<string, unknown> : null;
-        const nested = obj?.data && typeof obj.data === "object" ? obj.data as Record<string, unknown> : null;
-        const rows = Array.isArray(data) ? data : Array.isArray(obj?.results) ? obj.results : Array.isArray(nested?.results) ? nested.results : Array.isArray(nested?.data) ? nested.data : [];
-        console.log("Atlas Softruck diagnostic", JSON.stringify({
-          topLevelType: Array.isArray(data) ? "array" : typeof data,
-          topLevelKeys: obj ? Object.keys(obj) : [],
-          nestedKeys: nested ? Object.keys(nested) : [],
-          count: obj?.count ?? nested?.count ?? obj?.total ?? nested?.total ?? null,
-          rowCount: rows.length,
-          firstRowKeys: rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0] as Record<string, unknown>) : [],
-        }));
-      }
       return jsonResponse(req, 200, { ok: true, resource: resourceName, data });
     } catch {
       return jsonResponse(req, 502, { error: "atlas_invalid_json" });
     }
   } catch (error) {
     const err = error instanceof Error ? error : new Error("Erro desconhecido");
-    console.error("Falha inesperada na função Atlas", JSON.stringify({
-      name: err.name,
-      message: err.message,
-      stack: err.stack,
-    }));
+    console.error("Falha inesperada na função Atlas", err.name, err.message);
     return jsonResponse(req, 502, { error: "atlas_unavailable" });
   }
 });

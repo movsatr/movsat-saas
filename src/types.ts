@@ -61,8 +61,11 @@ export type AssociadoWithRelations = Associado & {
     placa: string;
     modelo: string;
     ano: number;
+    id_externo: string | null;
+    associado_id: string | null;
     rastreador_id: string | null;
     status: string;
+    rastreador: { id: string; imei: string; status: string } | null;
   }[];
 };
 
