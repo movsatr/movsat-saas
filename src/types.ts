@@ -131,6 +131,7 @@ export interface FinanceiroRecord {
   valor: number;
   status: 'pago' | 'pendente' | 'atrasado' | 'cancelado';
   data_vencimento: string | null;
+  competencia?: string | null;
   data_pagamento: string | null;
   forma_pagamento: 'pix' | 'boleto' | 'cartao' | 'dinheiro' | null;
   observacoes: string | null;

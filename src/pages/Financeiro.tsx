@@ -20,6 +20,8 @@ const localDate = () => {
   return `${year}-${month}-${day}`;
 };
 
+const formatCompetencia = (value?: string | null) => value ? `${value.slice(5, 7)}/${value.slice(0, 4)}` : '-';
+
 const effectiveStatus = (row: FinanceiroWithAssoc): FinanceiroRecord['status'] => {
   if (row.status === 'pendente' && row.data_vencimento && row.data_vencimento < localDate()) return 'atrasado';
   return row.status;
@@ -69,6 +71,9 @@ function FinanceiroContent() {
   const [form, setForm] = useState<Partial<FinanceiroRecord>>({});
 
   const loadData = async () => {
+    const billingRes = await supabase.rpc('gerar_mensalidades_recorrentes');
+    if (billingRes.error) toast.error(friendlyError(billingRes.error, 'financeiro'));
+
     const [finRes, assocRes] = await Promise.all([
       supabase.from('financeiro').select('*, associado:associados(nome)').order('data_vencimento', { ascending: false }),
       supabase.from('associados').select('id, nome').order('nome'),
@@ -110,6 +115,7 @@ function FinanceiroContent() {
 
   const handleSave = async () => {
     if (!form.associado_id) { toast.error('Selecione um cliente/associado'); return; }
+    if (form.tipo === 'mensalidade' && !form.data_vencimento) { toast.error('Informe o vencimento da mensalidade'); return; }
     if (!form.descricao?.trim()) { toast.error('Descrição é obrigatória'); return; }
     if (form.valor == null || Number(form.valor) <= 0 || !Number.isFinite(Number(form.valor))) { toast.error('Informe um valor válido maior que zero'); return; }
 
@@ -122,6 +128,9 @@ function FinanceiroContent() {
 
     Object.keys(payload).forEach((k) => { if (payload[k] === '') payload[k] = null; });
     if (payload.valor != null) payload.valor = Number(payload.valor);
+    payload.competencia = payload.tipo === 'mensalidade' && typeof payload.data_vencimento === 'string'
+      ? `${payload.data_vencimento.slice(0, 7)}-01`
+      : null;
 
     if (payload.status === 'pago' && !payload.data_pagamento) {
       payload.data_pagamento = localDate();
@@ -162,6 +171,7 @@ function FinanceiroContent() {
   const columns: Column<FinanceiroWithAssoc>[] = [
     { key: 'associado', header: 'Associado', sortable: true, sortValue: (r) => r.associado?.nome ?? '', render: (r) => <span className="font-medium text-slate-900 dark:text-white">{r.associado?.nome || r.nome_associado || 'Sem vínculo (registro legado)'}</span> },
     { key: 'tipo', header: 'Tipo', sortable: true, render: (r) => <span className="text-xs">{tipoLabels[r.tipo]}</span> },
+    { key: 'competencia', header: 'Competência', sortable: true, sortValue: (r) => r.competencia || '', render: (r) => formatCompetencia(r.competencia) },
     { key: 'descricao', header: 'Descrição', render: (r) => r.descricao },
     { key: 'valor', header: 'Valor', sortable: true, sortValue: (r) => Number(r.valor), render: (r) => <span className="font-semibold text-slate-900 dark:text-white">{formatCurrency(r.valor)}</span> },
     { key: 'status', header: 'Status', sortable: true, sortValue: (r) => effectiveStatus(r), render: (r) => <StatusBadge status={effectiveStatus(r)} /> },
