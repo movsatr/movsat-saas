@@ -265,7 +265,7 @@ export function Associados() {
         if (!response.ok || payload?.ok !== true) {
           const detail = String(payload?.error ?? ('HTTP ' + response.status));
           if (detail === 'softruck_api_token_not_configured') {
-            throw new Error('Token da API Softruck não configurado no Supabase (SOFTRUCK_V5_API_TOKEN).');
+            throw new Error('Token da API Softruck não configurado no Supabase (SOFTRUCK_API_TOKEN).');
           }
           throw new Error('Falha na consulta Softruck (' + resource + '): ' + detail);
         }
