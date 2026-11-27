@@ -50,7 +50,8 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  const softruckToken = Deno.env.get("SOFTRUCK_V5_API_TOKEN");
+  const softruckToken = Deno.env.get("SOFTRUCK_API_TOKEN") ?? Deno.env.get("SOFTRUCK_V5_API_TOKEN");
+  const softruckBaseUrl = (Deno.env.get("SOFTRUCK_API_BASE_URL") ?? "https://api.app.softruck.com").replace(/\/$/, "");
 
   if (!supabaseUrl || !anonKey || !serviceRoleKey) {
     return jsonResponse(req, 500, { error: "server_configuration_missing" });
@@ -58,7 +59,7 @@ Deno.serve(async (req: Request) => {
   if (!softruckToken) {
     return jsonResponse(req, 503, {
       error: "softruck_api_token_not_configured",
-      required_secret: "SOFTRUCK_V5_API_TOKEN",
+      required_secret: "SOFTRUCK_API_TOKEN",
     });
   }
 
@@ -134,7 +135,7 @@ Deno.serve(async (req: Request) => {
       query.set("filters[acc][btw]", start + "," + end);
     }
 
-    const upstreamUrl = new URL("https://api.app.softruck.com" + pathBuilder(id));
+    const upstreamUrl = new URL(softruckBaseUrl + pathBuilder(id));
     upstreamUrl.searchParams.set("q", btoa(query.toString()));
 
     let upstream: Response;
@@ -157,7 +158,7 @@ Deno.serve(async (req: Request) => {
         resource,
         upstream_status: upstream.status,
         hint: upstream.status === 401 || upstream.status === 403
-          ? "Verifique se SOFTRUCK_V5_API_TOKEN é um token de API válido da empresa."
+          ? "Verifique se SOFTRUCK_API_TOKEN é um token de API válido da empresa e se SOFTRUCK_API_BASE_URL aponta para a API de produção."
           : undefined,
       });
     }
