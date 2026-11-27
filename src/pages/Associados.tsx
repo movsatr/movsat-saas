@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Truck, Satellite, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle2, Circle as XCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -9,7 +9,6 @@ import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
 import type { Associado, AssociadoWithRelations } from '@/types';
-
 
 type SoftruckRecord = Record<string, unknown>;
 
@@ -74,11 +73,12 @@ export function Associados() {
   const { profile } = useAuth();
   const role = profile?.role;
   const canCreate = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
-  const canEdit = role === 'operador' || role === 'supervisor' || role === 'diretoria' || role === 'administrador';
-  const canDelete = role === 'operador' || role === 'diretoria' || role === 'administrador';
+  const canEdit = role === 'supervisor' || role === 'diretoria' || role === 'administrador';
+  const canDelete = role === 'diretoria' || role === 'administrador';
   const canSeeFinancial = role === 'diretoria' || role === 'administrador';
 
   const [data, setData] = useState<AssociadoWithRelations[]>([]);
+  const [unassignedVehicles, setUnassignedVehicles] = useState<Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -87,7 +87,6 @@ export function Associados() {
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Associado | null>(null);
   const [form, setForm] = useState<Partial<Associado>>({});
-  const mountedRef = useRef(true);
 
   const [atlasContracts, setAtlasContracts] = useState<Record<string, unknown>[]>([]);
   const [atlasLoading, setAtlasLoading] = useState(false);
@@ -106,12 +105,15 @@ export function Associados() {
   const ATLAS_PRODUCT_ID = '283';
   const ATLAS_PROBE_CONCURRENCY = 8;
 
+  const canChangeForm = creating ? canCreate : canEdit;
+  const mountedRef = useRef(true);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
@@ -129,7 +131,8 @@ export function Associados() {
               veiculo:veiculos(id, placa, modelo, ano)
             ),
             veiculos:veiculos(
-              id, placa, modelo, ano, rastreador_id, status
+              id, placa, modelo, ano, id_externo, associado_id, rastreador_id, status,
+              rastreador:rastreadores(id, imei, status)
             )
           `)
           .order('nome')
@@ -144,8 +147,27 @@ export function Associados() {
         else { offset += PAGE_SIZE; }
       }
 
+      const localUnassignedVehicles: Array<{ id_externo: string | null; rastreador: { id: string; imei: string; status: string } | null }> = [];
+      if (role === 'administrador' || role === 'diretoria') {
+        let vehicleOffset = 0;
+        while (true) {
+          const { data: unassignedPage, error: unassignedError } = await supabase
+            .from('veiculos')
+            .select('id_externo, rastreador:rastreadores(id, imei, status)')
+            .is('associado_id', null)
+            .not('id_externo', 'is', null)
+            .range(vehicleOffset, vehicleOffset + PAGE_SIZE - 1);
+          if (unassignedError) throw unassignedError;
+          const page = (unassignedPage ?? []) as unknown as typeof localUnassignedVehicles;
+          localUnassignedVehicles.push(...page);
+          if (page.length < PAGE_SIZE) break;
+          vehicleOffset += PAGE_SIZE;
+        }
+      }
+
       if (mountedRef.current) {
         setData(allAssociados);
+        setUnassignedVehicles(localUnassignedVehicles);
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -154,7 +176,7 @@ export function Associados() {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  };
+  }, [role]);
 
   const loadAtlasContracts = async (page = atlasPage) => {
     if (role !== 'administrador' && role !== 'diretoria') return;
@@ -369,7 +391,68 @@ export function Associados() {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+
+  const loadSoftruckFleet = async () => {
+    if (role !== 'administrador' && role !== 'diretoria') return;
+    setSoftruckLoading(true);
+    setSoftruckError(null);
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente para consultar a Softruck.');
+
+      const baseUrl = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/softruck-v5-api';
+      const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token };
+      const fetchResource = async (resource: string, page: number) => {
+        const query = new URLSearchParams({ resource, page: String(page), limit: '100' });
+        const response = await fetch(baseUrl + '?' + query.toString(), {
+          headers,
+          signal: AbortSignal.timeout(45000),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || payload?.ok !== true) {
+          const detail = String(payload?.error ?? ('HTTP ' + response.status));
+          if (detail === 'softruck_api_token_not_configured') {
+            throw new Error('Token da API Softruck não configurado no Supabase (SOFTRUCK_V5_API_TOKEN).');
+          }
+          throw new Error('Falha na consulta Softruck (' + resource + '): ' + detail);
+        }
+        return payload.data;
+      };
+
+      const fetchAll = async (resource: string) => {
+        const collected: SoftruckRecord[] = [];
+        for (let page = 1; page <= 500; page += 1) {
+          const responseData = await fetchResource(resource, page);
+          const pageRows = rowsFrom(responseData);
+          collected.push(...pageRows);
+          const meta = asRecord(responseData);
+          const totalPages = Number(meta.total_pages ?? meta.last_page ?? meta.pages ?? 0);
+          if (pageRows.length === 0 || (totalPages > 0 && page >= totalPages) || (totalPages <= 0 && pageRows.length < 100)) break;
+        }
+        return collected;
+      };
+
+      const results = await Promise.all([
+        fetchAll('vehicles'),
+        fetchAll('devices'),
+        fetchAll('users'),
+      ]);
+      setSoftruckVehicles(results[0]);
+      setSoftruckDevices(results[1]);
+      setSoftruckUsers(results[2]);
+      setSoftruckLoaded(true);
+      toast.success('Softruck consultada: ' + results[0].length + ' veículos, ' + results[1].length + ' dispositivos e ' + results[2].length + ' usuários.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao consultar a Softruck.';
+      setSoftruckError(message);
+      toast.error(message);
+    } finally {
+      setSoftruckLoading(false);
+    }
+  };
+
+  useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(1); }, [role]);
 
   const toggleRow = (id: string) => {
@@ -378,8 +461,7 @@ export function Associados() {
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
-    });
-  };
+    });  };
 
   const openCreate = () => {
     setForm({
@@ -408,8 +490,49 @@ export function Associados() {
   };
 
   const handleSave = async () => {
-    if (!form.nome?.trim()) { toast.error('Nome é obrigatório'); return; }
-    const payload: Record<string, unknown> = { ...form };
+    if (editing && !canEdit) {
+      toast.error('Seu perfil não pode editar associados');
+      return;
+    }
+    if (creating && !canCreate) {
+      toast.error('Seu perfil não pode criar associados');
+      return;
+    }
+
+    const nome = form.nome?.trim() ?? '';
+    if (!nome) {
+      toast.error('Nome é obrigatório');
+      return;
+    }
+
+    const cpfCnpj = form.cpf_cnpj?.trim() ?? '';
+    if (cpfCnpj) {
+      const digits = cpfCnpj.replace(/\D/g, '');
+      if (digits.length !== 11 && digits.length !== 14) {
+        toast.error('CPF/CNPJ inválido');
+        return;
+      }
+    }
+
+    const email = form.email?.trim() ?? '';
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('E-mail inválido');
+      return;
+    }
+
+    const mensalidade = Number(form.valor_mensalidade ?? 0);
+    if (!Number.isFinite(mensalidade) || mensalidade < 0) {
+      toast.error('Mensalidade inválida');
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      ...form,
+      nome,
+      cpf_cnpj: cpfCnpj || null,
+      email: email || null,
+      valor_mensalidade: mensalidade,
+    };
     delete payload.id;
     delete payload.created_at;
     delete payload.updated_at;
@@ -427,6 +550,11 @@ export function Associados() {
   };
 
   const handleDelete = async () => {
+    if (!canDelete) {
+      toast.error('Seu perfil não pode excluir associados');
+      setDeleteTarget(null);
+      return;
+    }
     if (!deleteTarget) return;
     const { error } = await supabase.from('associados').delete().eq('id', deleteTarget.id);
     if (error) { toast.error(friendlyError(error, 'associados')); return; }
@@ -465,6 +593,7 @@ export function Associados() {
         subtitle={`${data.length} associados cadastrados${search ? ` • ${filtered.length} na busca` : ''}`}
         action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Associado</Button> : undefined}
       />
+
 
       {(role === 'administrador' || role === 'diretoria') && (
         <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
@@ -619,8 +748,7 @@ export function Associados() {
       )}
 
       {loadError && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
-          <p className="text-sm text-red-700 dark:text-red-400">{loadError}</p>
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">          <p className="text-sm text-red-700 dark:text-red-400">{loadError}</p>
           <Button variant="secondary" className="mt-2" onClick={loadData}>Tentar novamente</Button>
         </div>
       )}
@@ -637,19 +765,19 @@ export function Associados() {
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-[1450px] w-full table-fixed text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30">
                 <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-8"></th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Nome</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">CPF/CNPJ</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Telefone</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cidade</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Plano</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Veículos</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Rastreadores</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Equip.</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Pagamento</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[240px]">Nome</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[190px]">CPF/CNPJ</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[150px]">Telefone</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[180px]">Cidade</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[140px]">Plano</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[220px]">Veículos</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[220px]">Rastreadores</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[100px]">Equip.</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[150px]">Pagamento</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-20"></th>
               </tr>
             </thead>
@@ -667,7 +795,7 @@ export function Associados() {
                   const placas = row.veiculos.map((v) => v.placa).join(', ');
                   const imeis = row.rastreadores.map((r) => r.imei).join(', ');
                   return (
-                    <tbody key={row.id}>
+                    <Fragment key={row.id}>
                       <tr
                         className={`border-b border-slate-100 dark:border-slate-800 transition-colors ${hasRelations ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`}
                         onClick={() => hasRelations && toggleRow(row.id)}
@@ -675,9 +803,9 @@ export function Associados() {
                         <td className="px-3 py-3 text-slate-400">
                           {hasRelations && (isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />)}
                         </td>
-                        <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{row.nome}</td>
-                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{row.cpf_cnpj || '-'}</td>
-                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{row.telefone || '-'}</td>
+                        <td className="px-4 py-3 font-medium text-slate-900 dark:text-white break-words">{row.nome}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">{row.cpf_cnpj || '-'}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">{row.telefone || '-'}</td>
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                           {[row.cidade, row.estado].filter(Boolean).join('/') || '-'}
                         </td>
@@ -783,7 +911,7 @@ export function Associados() {
                           </td>
                         </tr>
                       )}
-                    </tbody>
+                    </Fragment>
                   );
                 })
               )}
@@ -799,47 +927,46 @@ export function Associados() {
         footer={
           <>
             <Button variant="secondary" onClick={closeDrawer}>Cancelar</Button>
-            {canEdit && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
+            {canChangeForm && <Button variant="primary" onClick={handleSave}>Salvar</Button>}
           </>
         }
       >
         <div className="space-y-4">
           <div>
             <label className="label">Nome *</label>
-            <input className="input" disabled={!canEdit} value={form.nome ?? ''} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome do associado" />
+            <input className="input" disabled={!canChangeForm} value={form.nome ?? ''} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome do associado" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">CPF/CNPJ</label>
-              <input className="input" disabled={!canEdit} value={form.cpf_cnpj ?? ''} onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} placeholder="000.000.000-00" />
+              <input className="input" disabled={!canChangeForm} value={form.cpf_cnpj ?? ''} onChange={(e) => setForm({ ...form, cpf_cnpj: e.target.value })} placeholder="000.000.000-00" />
             </div>
             <div>
               <label className="label">Telefone</label>
-              <input className="input" disabled={!canEdit} value={form.telefone ?? ''} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(77) 99999-9999" />
+              <input className="input" disabled={!canChangeForm} value={form.telefone ?? ''} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(77) 99999-9999" />
             </div>
           </div>
           <div>
             <label className="label">E-mail</label>
-            <input className="input" type="email" disabled={!canEdit} value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@exemplo.com" />
-          </div>
-          <div>
+            <input className="input" type="email" disabled={!canChangeForm} value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@exemplo.com" />
+          </div>          <div>
             <label className="label">Endereço</label>
-            <input className="input" disabled={!canEdit} value={form.endereco ?? ''} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Rua, número, bairro" />
+            <input className="input" disabled={!canChangeForm} value={form.endereco ?? ''} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Rua, número, bairro" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Cidade</label>
-              <input className="input" disabled={!canEdit} value={form.cidade ?? ''} onChange={(e) => setForm({ ...form, cidade: e.target.value })} placeholder="Cidade" />
+              <input className="input" disabled={!canChangeForm} value={form.cidade ?? ''} onChange={(e) => setForm({ ...form, cidade: e.target.value })} placeholder="Cidade" />
             </div>
             <div>
               <label className="label">Estado</label>
-              <input className="input" disabled={!canEdit} value={form.estado ?? ''} onChange={(e) => setForm({ ...form, estado: e.target.value })} placeholder="UF" />
+              <input className="input" disabled={!canChangeForm} value={form.estado ?? ''} onChange={(e) => setForm({ ...form, estado: e.target.value })} placeholder="UF" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Plano</label>
-              <select className="input" disabled={!canEdit} value={form.plano ?? 'Basico'} onChange={(e) => setForm({ ...form, plano: e.target.value })}>
+              <select className="input" disabled={!canChangeForm} value={form.plano ?? 'Basico'} onChange={(e) => setForm({ ...form, plano: e.target.value })}>
                 <option value="Basico">Básico</option>
                 <option value="Intermediario">Intermediário</option>
                 <option value="Premium">Premium</option>
@@ -849,14 +976,14 @@ export function Associados() {
             {canSeeFinancial && (
               <div>
                 <label className="label">Mensalidade (R$)</label>
-                <input className="input" type="number" step="0.01" disabled={!canEdit} value={form.valor_mensalidade ?? 0} onChange={(e) => setForm({ ...form, valor_mensalidade: e.target.value === '' ? 0 : Number(e.target.value) })} />
+                <input className="input" type="number" min="0" step="0.01" disabled={!canChangeForm} value={form.valor_mensalidade ?? 0} onChange={(e) => setForm({ ...form, valor_mensalidade: e.target.value === '' ? 0 : Number(e.target.value) })} />
               </div>
             )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Status Pagamento</label>
-              <select className="input" disabled={!canEdit} value={form.status_pagamento ?? 'em_dia'} onChange={(e) => setForm({ ...form, status_pagamento: e.target.value as Associado['status_pagamento'] })}>
+              <select className="input" disabled={!canChangeForm} value={form.status_pagamento ?? 'em_dia'} onChange={(e) => setForm({ ...form, status_pagamento: e.target.value as Associado['status_pagamento'] })}>
                 <option value="em_dia">Em dia</option>
                 <option value="atrasado">Atrasado</option>
                 <option value="inadimplente">Inadimplente</option>
@@ -864,16 +991,15 @@ export function Associados() {
             </div>
             <div>
               <label className="label">Status Equipamento</label>
-              <select className="input" disabled={!canEdit} value={form.status_equipamento ?? 'sem_equipamento'} onChange={(e) => setForm({ ...form, status_equipamento: e.target.value as Associado['status_equipamento'] })}>
+              <select className="input" disabled={!canChangeForm} value={form.status_equipamento ?? 'sem_equipamento'} onChange={(e) => setForm({ ...form, status_equipamento: e.target.value as Associado['status_equipamento'] })}>
                 <option value="ok">OK</option>
                 <option value="com_problema">Com problema</option>
                 <option value="sem_equipamento">Sem equipamento</option>
               </select>
             </div>
-          </div>
-          <div>
+          </div>          <div>
             <label className="label">Observações</label>
-            <textarea className="input" rows={3} disabled={!canEdit} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas internas" />
+            <textarea className="input" rows={3} disabled={!canChangeForm} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas internas" />
           </div>
         </div>
       </CaseView>
