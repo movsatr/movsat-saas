@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Truck, Satellite, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle2, Circle as XCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
@@ -247,8 +247,7 @@ export function Associados() {
 
 
       {loadError && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
-          <p className="text-sm text-red-700 dark:text-red-400">{loadError}</p>
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">          <p className="text-sm text-red-700 dark:text-red-400">{loadError}</p>
           <Button variant="secondary" className="mt-2" onClick={loadData}>Tentar novamente</Button>
         </div>
       )}
@@ -265,19 +264,19 @@ export function Associados() {
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-[1450px] w-full table-fixed text-sm">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30">
                 <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-8"></th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Nome</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">CPF/CNPJ</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Telefone</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cidade</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Plano</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Veículos</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Rastreadores</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Equip.</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Pagamento</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[240px]">Nome</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[190px]">CPF/CNPJ</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[150px]">Telefone</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[180px]">Cidade</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[140px]">Plano</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[220px]">Veículos</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[220px]">Rastreadores</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[100px]">Equip.</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-[150px]">Pagamento</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-20"></th>
               </tr>
             </thead>
@@ -295,7 +294,7 @@ export function Associados() {
                   const placas = row.veiculos.map((v) => v.placa).join(', ');
                   const imeis = row.rastreadores.map((r) => r.imei).join(', ');
                   return (
-                    <tbody key={row.id}>
+                    <Fragment key={row.id}>
                       <tr
                         className={`border-b border-slate-100 dark:border-slate-800 transition-colors ${hasRelations ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`}
                         onClick={() => hasRelations && toggleRow(row.id)}
@@ -303,9 +302,9 @@ export function Associados() {
                         <td className="px-3 py-3 text-slate-400">
                           {hasRelations && (isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />)}
                         </td>
-                        <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{row.nome}</td>
-                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{row.cpf_cnpj || '-'}</td>
-                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{row.telefone || '-'}</td>
+                        <td className="px-4 py-3 font-medium text-slate-900 dark:text-white break-words">{row.nome}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">{row.cpf_cnpj || '-'}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap">{row.telefone || '-'}</td>
                         <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
                           {[row.cidade, row.estado].filter(Boolean).join('/') || '-'}
                         </td>
@@ -411,7 +410,7 @@ export function Associados() {
                           </td>
                         </tr>
                       )}
-                    </tbody>
+                    </Fragment>
                   );
                 })
               )}
@@ -497,8 +496,7 @@ export function Associados() {
                 <option value="sem_equipamento">Sem equipamento</option>
               </select>
             </div>
-          </div>
-          <div>
+          </div>          <div>
             <label className="label">Observações</label>
             <textarea className="input" rows={3} disabled={!canChangeForm} value={form.observacoes ?? ''} onChange={(e) => setForm({ ...form, observacoes: e.target.value || null })} placeholder="Notas internas" />
           </div>
