@@ -7,13 +7,13 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 const RESOURCE_PATHS: Record<string, (id: string) => string> = {
-  vehicles: () => "/api/v5/vehicles",
-  devices: () => "/api/v5/devices",
-  users: () => "/api/v5/users",
-  tracking: () => "/api/v5/tracking",
-  trajectories: () => "/api/v5/trajectories",
-  vehicle_devices: (id) => "/api/v5/vehicles/" + encodeURIComponent(id) + "/associations/devices",
-  vehicle_users: (id) => "/api/v5/vehicles/" + encodeURIComponent(id) + "/associations/users",
+  vehicles: () => "/vehicles/",
+  devices: () => "/devices/",
+  users: () => "/users/",
+  tracking: (id) => "/vehicles/" + encodeURIComponent(id) + "/tracking/",
+  trajectories: (id) => "/vehicles/" + encodeURIComponent(id) + "/trajectories/",
+  vehicle_devices: (id) => "/vehicles/" + encodeURIComponent(id) + "/associations/devices",
+  vehicle_users: (id) => "/vehicles/" + encodeURIComponent(id) + "/associations/users",
 };
 
 function corsHeaders(req: Request): Headers {
@@ -51,7 +51,8 @@ Deno.serve(async (req: Request) => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const softruckToken = Deno.env.get("SOFTRUCK_API_TOKEN") ?? Deno.env.get("SOFTRUCK_V5_API_TOKEN");
-  const softruckBaseUrl = (Deno.env.get("SOFTRUCK_API_BASE_URL") ?? "https://api.app.softruck.com").replace(/\/$/, "");
+  const softruckPublicKey = Deno.env.get("SOFTRUCK_API_PUBLIC_KEY");
+  const softruckBaseUrl = (Deno.env.get("SOFTRUCK_API_BASE_URL") ?? "https://api.softruck.com/v2").replace(/\/$/, "");
 
   if (!supabaseUrl || !anonKey || !serviceRoleKey) {
     return jsonResponse(req, 500, { error: "server_configuration_missing" });
@@ -97,8 +98,8 @@ Deno.serve(async (req: Request) => {
     }
 
     const id = incoming.searchParams.get("id") ?? "";
-    if ((resource === "vehicle_devices" || resource === "vehicle_users") &&
-        (!id || !/^[a-zA-Z0-9_-]{1,128}$/.test(id))) {
+    if ((resource === "vehicle_devices" || resource === "vehicle_users" || resource === "tracking" || resource === "trajectories") &&
+        (!id || !/^[a-zA-Z0-9]{15}$/.test(id))) {
       return jsonResponse(req, 400, { error: "valid_vehicle_id_required" });
     }
 
@@ -112,13 +113,30 @@ Deno.serve(async (req: Request) => {
     const query = new URLSearchParams();
     query.set("page", String(page));
     query.set("limit", String(limit));
-    query.set("attributes", "*");
 
     if (resource === "vehicles") {
+      query.set("attributes", "batch,plate,code,vin,type,brand,model,year,description,registration_number,color,deactivated_at");
       query.set("includes[devices]", "*");
       query.set("includes[users]", "*");
-    }
-    if (resource === "trajectories") {
+    } else if (resource === "devices") {
+      query.set("attributes", "name,imei,batch,created_at,updated_at,code");
+    } else if (resource === "users") {
+      query.set("attributes", "username,email,name,phone1,phone2,document_number,cpf,created_at,updated_at,deactivated_at");
+    } else if (resource === "vehicle_devices") {
+      query.set("attributes", "created_at,deleted_at,is_main_device");
+      query.set("includes[device]", "*");
+    } else if (resource === "vehicle_users") {
+      query.set("attributes", "created_at,deleted_at,nature");
+      query.set("includes[user]", "*");
+    } else if (resource === "tracking") {
+      const deviceId = incoming.searchParams.get("device_id") ?? "";
+      if (!/^[a-zA-Z0-9]{15}$/.test(deviceId)) {
+        return jsonResponse(req, 400, { error: "valid_device_id_required" });
+      }
+      query.set("format", "JSON");
+      const trackingUrl = new URL(softruckBaseUrl + "/vehicles/" + encodeURIComponent(id) + "/tracking/" + encodeURIComponent(deviceId));
+      for (const [key, value] of query) trackingUrl.searchParams.set(key, value);
+    } else if (resource === "trajectories") {
       const start = incoming.searchParams.get("from");
       const end = incoming.searchParams.get("to");
       if (!validDate(start) || !validDate(end) || start > end) {
@@ -129,20 +147,23 @@ Deno.serve(async (req: Request) => {
       }
       const days = (Date.parse(end + "T00:00:00Z") - Date.parse(start + "T00:00:00Z")) / 86400000;
       if (days > 31) return jsonResponse(req, 400, { error: "date_range_too_large", max_days: 32 });
-      query.set("includes[enterprise]", "*");
-      query.set("includes[vehicle]", "*");
       query.set("includes[device]", "*");
-      query.set("filters[acc][btw]", start + "," + end);
+      query.set("filters[date][gte]", start.replaceAll("-", ""));
+      query.set("filters[date][lte]", end.replaceAll("-", ""));
     }
 
     const upstreamUrl = new URL(softruckBaseUrl + pathBuilder(id));
-    upstreamUrl.searchParams.set("q", btoa(query.toString()));
+    for (const [key, value] of query) upstreamUrl.searchParams.set(key, value);
 
     let upstream: Response;
     try {
       upstream = await fetch(upstreamUrl, {
         method: "GET",
-        headers: { Authorization: "Bearer " + softruckToken, Accept: "application/json" },
+        headers: {
+          Authorization: "Bearer " + softruckToken,
+          Accept: "application/json",
+          ...(softruckPublicKey ? { "public-key": softruckPublicKey } : {}),
+        },
         signal: AbortSignal.timeout(30000),
       });
     } catch (error) {
@@ -158,7 +179,7 @@ Deno.serve(async (req: Request) => {
         resource,
         upstream_status: upstream.status,
         hint: upstream.status === 401 || upstream.status === 403
-          ? "Verifique se SOFTRUCK_API_TOKEN é um token de API válido da empresa e se SOFTRUCK_API_BASE_URL aponta para a API de produção."
+          ? "Verifique o token Softruck, o SOFTRUCK_API_PUBLIC_KEY (se exigido pela conta) e a URL de produção configurada."
           : undefined,
       });
     }
@@ -175,7 +196,7 @@ Deno.serve(async (req: Request) => {
 
     return jsonResponse(req, 200, {
       ok: true,
-      source: "softruck_api_v5",
+      source: "softruck_api_v2",
       resource,
       endpoint: pathBuilder(id),
       query: { page, limit },
