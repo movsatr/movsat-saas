@@ -16,7 +16,7 @@ Todas as rotas são chamadas com GET. Nenhuma operação de criação, edição,
 
 ## Secret necessário
 
-Cadastre `SOFTRUCK_V5_API_TOKEN` nos secrets das Edge Functions do projeto Supabase. Gere o token na plataforma Softruck em **Empresas → empresa da Mov Sat → API → criar token**. Não coloque o token no frontend, no GitHub ou nesta documentação.
+Cadastre `SOFTRUCK_API_TOKEN` nos secrets das Edge Functions do projeto Supabase. O código mantém compatibilidade com o nome antigo `SOFTRUCK_V5_API_TOKEN`. Gere o token na plataforma Softruck em **Empresas → empresa da Mov Sat → API → criar token**. Configure opcionalmente `SOFTRUCK_API_BASE_URL` com a URL de produção confirmada pela Softruck. Se não for configurada, o proxy usa `https://api.app.softruck.com`. Não coloque o token no frontend, no GitHub ou nesta documentação.
 
 ## Chamada
 
@@ -26,5 +26,5 @@ Enviar o access token da sessão Supabase no header `Authorization: Bearer <supa
 
 - Requer sessão Supabase válida e perfil `administrador` ou `diretoria`.
 - A consulta é somente leitura e mantém o token Softruck no servidor.
-- A API usa o parâmetro `q` com os filtros/paginação codificados em Base64.
+- A API usa o parâmetro `q` com os filtros/paginação codificados em Base64. A base da API é configurável por `SOFTRUCK_API_BASE_URL` para evitar fixar uma URL de ambiente não confirmada.
 - O formato exato dos campos retornados depende dos dados disponíveis na conta Softruck; a tela deve tratar campos ausentes como não informados, nunca como vínculo inexistente.
