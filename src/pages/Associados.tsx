@@ -10,6 +10,63 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
+
+type SoftruckRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): SoftruckRecord {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as SoftruckRecord : {};
+}
+
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return '';
+}
+
+function rowsFrom(value: unknown): SoftruckRecord[] {
+  if (Array.isArray(value)) return value.map(asRecord);
+  const record = asRecord(value);
+  for (const key of ['results', 'items', 'records', 'vehicles', 'devices', 'users']) {
+    if (Array.isArray(record[key])) return (record[key] as unknown[]).map(asRecord);
+  }
+  if (Array.isArray(record.data)) return (record.data as unknown[]).map(asRecord);
+  if (record.data && typeof record.data === 'object') return rowsFrom(record.data);
+  return [];
+}
+
+function relationRows(record: SoftruckRecord, keys: string[]): SoftruckRecord[] {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value.map(asRecord);
+    const nested = asRecord(value);
+    if (Array.isArray(nested.data)) return (nested.data as unknown[]).map(asRecord);
+    if (Object.keys(nested).length) return [nested];
+  }
+  const relationships = asRecord(record.relationships);
+  for (const key of keys) {
+    const nested = asRecord(relationships[key]);
+    if (Array.isArray(nested.data)) return (nested.data as unknown[]).map(asRecord);
+    if (nested.data && typeof nested.data === 'object') return [asRecord(nested.data)];
+  }
+  return [];
+}
+
+function softruckPlate(record: SoftruckRecord): string {
+  const attributes = asRecord(record.attributes);
+  return firstText(record.plate, record.license_plate, record.licensePlate, record.registration, record.vehicle_plate, attributes.plate, attributes.license_plate).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function softruckId(record: SoftruckRecord): string {
+  return firstText(record.id, record.uuid, record.vehicle_id, record.device_id);
+}
+
+function softruckLabel(record: SoftruckRecord, fields: string[]): string {
+  const attributes = asRecord(record.attributes);
+  return firstText(...fields.map((field) => record[field]), ...fields.map((field) => attributes[field]));
+}
+
 const PAGE_SIZE = 50;
 
 export function Associados() {
@@ -38,6 +95,13 @@ export function Associados() {
   const [atlasPage, setAtlasPage] = useState(1);
   const [atlasCount, setAtlasCount] = useState(0);
   const [atlasTotalPages, setAtlasTotalPages] = useState(1);
+  const [softruckVehicles, setSoftruckVehicles] = useState<SoftruckRecord[]>([]);
+  const [softruckDevices, setSoftruckDevices] = useState<SoftruckRecord[]>([]);
+  const [softruckUsers, setSoftruckUsers] = useState<SoftruckRecord[]>([]);
+  const [softruckLoading, setSoftruckLoading] = useState(false);
+  const [softruckLoaded, setSoftruckLoaded] = useState(false);
+  const [softruckError, setSoftruckError] = useState<string | null>(null);
+  const [softruckSearch, setSoftruckSearch] = useState('');
   const ATLAS_CONTRACTS_PER_PAGE = 50;
   const ATLAS_PRODUCT_ID = '283';
   const ATLAS_PROBE_CONCURRENCY = 8;
@@ -244,6 +308,67 @@ export function Associados() {
     }
   };
 
+
+  const loadSoftruckFleet = async () => {
+    if (role !== 'administrador' && role !== 'diretoria') return;
+    setSoftruckLoading(true);
+    setSoftruckError(null);
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente para consultar a Softruck.');
+
+      const baseUrl = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/softruck-v5-api';
+      const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token };
+      const fetchResource = async (resource: string, page: number) => {
+        const query = new URLSearchParams({ resource, page: String(page), limit: '100' });
+        const response = await fetch(baseUrl + '?' + query.toString(), {
+          headers,
+          signal: AbortSignal.timeout(45000),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || payload?.ok !== true) {
+          const detail = String(payload?.error ?? ('HTTP ' + response.status));
+          if (detail === 'softruck_api_token_not_configured') {
+            throw new Error('Token da API Softruck não configurado no Supabase (SOFTRUCK_V5_API_TOKEN).');
+          }
+          throw new Error('Falha na consulta Softruck (' + resource + '): ' + detail);
+        }
+        return payload.data;
+      };
+
+      const fetchAll = async (resource: string) => {
+        const collected: SoftruckRecord[] = [];
+        for (let page = 1; page <= 500; page += 1) {
+          const responseData = await fetchResource(resource, page);
+          const pageRows = rowsFrom(responseData);
+          collected.push(...pageRows);
+          const meta = asRecord(responseData);
+          const totalPages = Number(meta.total_pages ?? meta.last_page ?? meta.pages ?? 0);
+          if (pageRows.length === 0 || (totalPages > 0 && page >= totalPages) || (totalPages <= 0 && pageRows.length < 100)) break;
+        }
+        return collected;
+      };
+
+      const results = await Promise.all([
+        fetchAll('vehicles'),
+        fetchAll('devices'),
+        fetchAll('users'),
+      ]);
+      setSoftruckVehicles(results[0]);
+      setSoftruckDevices(results[1]);
+      setSoftruckUsers(results[2]);
+      setSoftruckLoaded(true);
+      toast.success('Softruck consultada: ' + results[0].length + ' veículos, ' + results[1].length + ' dispositivos e ' + results[2].length + ' usuários.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao consultar a Softruck.';
+      setSoftruckError(message);
+      toast.error(message);
+    } finally {
+      setSoftruckLoading(false);
+    }
+  };
+
   useEffect(() => { loadData(); }, []);
   useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(1); }, [role]);
 
@@ -400,6 +525,96 @@ export function Associados() {
             <span className="text-xs text-slate-500">Página {atlasPage} de {atlasTotalPages} de contratos ativos — veículos com produto 283</span>
             <Button variant="secondary" disabled={atlasLoading || atlasPage >= atlasTotalPages} onClick={() => loadAtlasContracts(atlasPage + 1)}>Próxima</Button>
           </div>
+        </section>
+      )}
+
+      {(role === 'administrador' || role === 'diretoria') && (
+        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Integração Softruck</h2>
+                <Badge color="blue">somente leitura</Badge>
+              </div>
+              <p className="mt-1 text-sm text-slate-500">Frota, placas, dispositivos/rastreadores e titulares consultados diretamente na Softruck. Nenhum cadastro local é criado ou alterado.</p>
+            </div>
+            <Button variant="secondary" onClick={loadSoftruckFleet} disabled={softruckLoading}>
+              {softruckLoading ? 'Consultando Softruck…' : softruckLoaded ? 'Atualizar dados Softruck' : 'Consultar Softruck'}
+            </Button>
+          </div>
+          {softruckError && <p className="mb-3 text-sm text-red-600">{softruckError}</p>}
+          {softruckLoading && <p className="mb-3 text-sm text-slate-500">Buscando todas as páginas de veículos, dispositivos e usuários…</p>}
+          {softruckLoaded && (
+            <>
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+                  <p className="text-xs text-slate-500">Veículos na Softruck</p>
+                  <p className="mt-1 text-xl font-semibold">{softruckVehicles.length.toLocaleString('pt-BR')}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+                  <p className="text-xs text-slate-500">Dispositivos/rastreadores</p>
+                  <p className="mt-1 text-xl font-semibold">{softruckDevices.length.toLocaleString('pt-BR')}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+                  <p className="text-xs text-slate-500">Usuários/titulares</p>
+                  <p className="mt-1 text-xl font-semibold">{softruckUsers.length.toLocaleString('pt-BR')}</p>
+                </div>
+              </div>
+              <div className="mb-3 max-w-sm">
+                <input className="input" value={softruckSearch} onChange={(event) => setSoftruckSearch(event.target.value)} placeholder="Buscar placa, modelo ou titular na Softruck..." />
+              </div>
+              <div className="max-h-[520px] overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-800">
+                    <tr>
+                      <th className="px-3 py-3">Placa</th>
+                      <th className="px-3 py-3">Veículo</th>
+                      <th className="px-3 py-3">Rastreador / identificador</th>
+                      <th className="px-3 py-3">Titular</th>
+                      <th className="px-3 py-3">Atlas/Mutual</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {softruckVehicles
+                      .filter((vehicle) => {
+                        const plate = softruckPlate(vehicle);
+                        const model = softruckLabel(vehicle, ['model', 'vehicle_model', 'name', 'description']);
+                        const holder = relationRows(vehicle, ['users', 'user', 'owners']).map((user) => softruckLabel(user, ['name', 'full_name', 'display_name'])).join(' ');
+                        const query = softruckSearch.trim().toLowerCase();
+                        return !query || [plate, model, holder].join(' ').toLowerCase().includes(query);
+                      })
+                      .map((vehicle, index) => {
+                        const plate = softruckPlate(vehicle);
+                        const vehicleId = softruckId(vehicle);
+                        const embeddedDevices = relationRows(vehicle, ['devices', 'device']);
+                        const embeddedUsers = relationRows(vehicle, ['users', 'user', 'owners']);
+                        const deviceId = firstText(vehicle.device_id, vehicle.deviceId, vehicle.main_device_id);
+                        const userId = firstText(vehicle.user_id, vehicle.userId, vehicle.owner_id);
+                        const linkedDevice = embeddedDevices[0] ?? softruckDevices.find((device) => softruckId(device) === deviceId || firstText(device.vehicle_id, device.vehicleId, device.object_id) === vehicleId);
+                        const linkedUser = embeddedUsers[0] ?? softruckUsers.find((user) => softruckId(user) === userId || firstText(user.vehicle_id, user.vehicleId, user.object_id) === vehicleId);
+                        const tracker = linkedDevice ? softruckLabel(linkedDevice, ['imei', 'serial', 'identifier', 'code', 'name', 'device_id']) : firstText(vehicle.imei, vehicle.serial, vehicle.identifier);
+                        const holder = linkedUser ? softruckLabel(linkedUser, ['name', 'full_name', 'display_name', 'username']) : firstText(vehicle.user_name, vehicle.owner_name, vehicle.holder_name);
+                        const atlasMatch = atlasContracts.some((row) => {
+                          const atlasVehicle = asRecord(row.vehicle_data);
+                          return plate && firstText(atlasVehicle.plate).toUpperCase().replace(/[^A-Z0-9]/g, '') === plate;
+                        });
+                        return (
+                          <tr key={vehicleId || (plate + '-' + index)} className="border-t border-slate-100 dark:border-slate-800">
+                            <td className="px-3 py-3 font-mono font-semibold">{plate || 'Placa não retornada'}</td>
+                            <td className="px-3 py-3">{softruckLabel(vehicle, ['model', 'vehicle_model', 'name', 'description']) || 'Não informado'}</td>
+                            <td className="px-3 py-3 font-mono text-xs">{tracker || 'Vínculo não retornado pela API'}</td>
+                            <td className="px-3 py-3">{holder || 'Titular não retornado pela API'}</td>
+                            <td className="px-3 py-3">{atlasMatch ? <Badge color="green">Encontrado na página Atlas atual</Badge> : <Badge color="slate">Não localizado nesta página Atlas</Badge>}</td>
+                          </tr>
+                        );
+                      })}
+                    {softruckVehicles.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-500">A API não retornou veículos.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">O cruzamento Atlas/Mutual mostrado aqui considera somente a página Atlas atualmente carregada. Campos de vínculo ausentes na resposta Softruck aparecem como “não retornado”, sem serem classificados como ausência de rastreador ou titular.</p>
+            </>
+          )}
         </section>
       )}
 
