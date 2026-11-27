@@ -482,23 +482,26 @@ export function Associados() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                <th className="px-3 py-3">Associado</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato</th><th className="px-3 py-3">Status</th>
+                <th className="px-3 py-3">Associado</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Produto</th><th className="px-3 py-3">Contrato</th><th className="px-3 py-3">Status</th>
               </tr></thead>
               <tbody>
                 {atlasContracts.map((row, index) => {
                   const person = (row.person_data ?? {}) as Record<string, unknown>;
                   const vehicle = (row.vehicle_data ?? {}) as Record<string, unknown>;
                   const contract = (row.contract_data ?? {}) as Record<string, unknown>;
+                  const products = Array.isArray(row.product_data) ? row.product_data.map(asRecord) : [];
+                  const productNames = products.map((product) => firstText(product.product_name, product.subproduct_description, product.subproduct_supplier_code)).filter(Boolean).join(' • ');
                   return <tr key={String(row.id ?? index)} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="px-3 py-3 font-medium">{String(person.name ?? 'Nome não informado pela API')}</td>
                     
                     <td className="px-3 py-3 font-mono">{String(vehicle.plate ?? '—')}</td>
                     <td className="px-3 py-3">{[vehicle.assembler, vehicle.model].filter(Boolean).join(' ') || '—'}</td>
-                    <td className="px-3 py-3">{String(contract.contract_id ?? '—')}</td>
-                    <td className="px-3 py-3">{String(contract.contract_status ?? '—')}</td>
+                    <td className="px-3 py-3">{productNames || '—'}</td>
+                    <td className="px-3 py-3">{String(contract.id ?? contract.contract_id ?? '—')}</td>
+                    <td className="px-3 py-3">{String(contract.status ?? contract.contract_status ?? '—')}</td>
                   </tr>;
                 })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={5}>Nenhum veículo com produto identificado como rastreamento nesta página.</td></tr>}
+                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={6}>Nenhum veículo com produto identificado como rastreamento nesta página.</td></tr>}
               </tbody>
             </table>
           </div>
