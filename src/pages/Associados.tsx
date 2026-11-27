@@ -392,66 +392,6 @@ export function Associados() {
   };
 
 
-  const loadSoftruckFleet = async () => {
-    if (role !== 'administrador' && role !== 'diretoria') return;
-    setSoftruckLoading(true);
-    setSoftruckError(null);
-    try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente para consultar a Softruck.');
-
-      const baseUrl = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/softruck-v5-api';
-      const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token };
-      const fetchResource = async (resource: string, page: number) => {
-        const query = new URLSearchParams({ resource, page: String(page), limit: '100' });
-        const response = await fetch(baseUrl + '?' + query.toString(), {
-          headers,
-          signal: AbortSignal.timeout(45000),
-        });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || payload?.ok !== true) {
-          const detail = String(payload?.error ?? ('HTTP ' + response.status));
-          if (detail === 'softruck_api_token_not_configured') {
-            throw new Error('Token da API Softruck não configurado no Supabase (SOFTRUCK_V5_API_TOKEN).');
-          }
-          throw new Error('Falha na consulta Softruck (' + resource + '): ' + detail);
-        }
-        return payload.data;
-      };
-
-      const fetchAll = async (resource: string) => {
-        const collected: SoftruckRecord[] = [];
-        for (let page = 1; page <= 500; page += 1) {
-          const responseData = await fetchResource(resource, page);
-          const pageRows = rowsFrom(responseData);
-          collected.push(...pageRows);
-          const meta = asRecord(responseData);
-          const totalPages = Number(meta.total_pages ?? meta.last_page ?? meta.pages ?? 0);
-          if (pageRows.length === 0 || (totalPages > 0 && page >= totalPages) || (totalPages <= 0 && pageRows.length < 100)) break;
-        }
-        return collected;
-      };
-
-      const results = await Promise.all([
-        fetchAll('vehicles'),
-        fetchAll('devices'),
-        fetchAll('users'),
-      ]);
-      setSoftruckVehicles(results[0]);
-      setSoftruckDevices(results[1]);
-      setSoftruckUsers(results[2]);
-      setSoftruckLoaded(true);
-      toast.success('Softruck consultada: ' + results[0].length + ' veículos, ' + results[1].length + ' dispositivos e ' + results[2].length + ' usuários.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Falha ao consultar a Softruck.';
-      setSoftruckError(message);
-      toast.error(message);
-    } finally {
-      setSoftruckLoading(false);
-    }
-  };
-
   useEffect(() => { void loadData(); }, [loadData]);
   useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(1); }, [role]);
 
