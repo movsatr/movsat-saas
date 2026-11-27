@@ -8,7 +8,6 @@ import { PageHeader } from '@/components/DataTable';
 import { CaseView } from '@/components/CaseView';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button, StatusBadge, LoadingSpinner, Badge, formatCurrency, formatDate } from '@/components/ui';
-import { compareWithLocal, fetchActiveObjectProductCatalog, type ActiveProductScanResult, type ActiveTrackerRecord, type AtlasQuery } from '@/lib/atlas-contract-objects';
 import type { Associado, AssociadoWithRelations } from '@/types';
 
 const PAGE_SIZE = 50;
@@ -34,14 +33,6 @@ export function Associados() {
   const [form, setForm] = useState<Partial<Associado>>({});
   const canChangeForm = creating ? canCreate : canEdit;
   const mountedRef = useRef(true);
-
-  const [atlasContracts, setAtlasContracts] = useState<ActiveTrackerRecord[]>([]);
-  const [productScan, setProductScan] = useState<ActiveProductScanResult | null>(null);
-  const [atlasLoading, setAtlasLoading] = useState(false);
-  const [atlasProgress, setAtlasProgress] = useState<{ page: number; pagesTotal: number | null; objectsScanned: number; totalActiveObjects: number | null } | null>(null);
-  const [atlasError, setAtlasError] = useState<string | null>(null);
-  const [atlasLastRefresh, setAtlasLastRefresh] = useState<string | null>(null);
-  const [softruckDiagnostic, setSoftruckDiagnostic] = useState<{ count: number; fields: string[]; routes?: Array<{ resource: string; httpStatus: number; count: number | null; pageRows: number | null; sampleFields: string[] }> } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -113,63 +104,7 @@ export function Associados() {
     }
   }, [role]);
 
-  const loadAtlasContracts = useCallback(async () => {
-    if (role !== 'administrador' && role !== 'diretoria') return;
-    setAtlasLoading(true);
-    setAtlasError(null);
-    setAtlasProgress({ page: 0, pagesTotal: null, objectsScanned: 0, totalActiveObjects: null });
-    try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (sessionError || !token) throw new Error('Sessão inválida. Entre novamente para consultar a Mutual Tech.');
-      const headers = { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
-      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/atlas-api`;
-
-      const atlasGet: AtlasQuery = async (params) => {
-        const query = new URLSearchParams(params);
-        const response = await fetch(`${baseUrl}?${query.toString()}`, {
-          headers,
-          signal: AbortSignal.timeout(35000),
-        });
-        if (!response.ok) {
-          let detail = `HTTP ${response.status}`;
-          try {
-            const errorPayload = await response.json() as { error?: string };
-            detail = errorPayload.error ?? detail;
-          } catch { /* resposta não-JSON */ }
-          throw new Error(`Falha na consulta à Mutual Tech: ${detail}`);
-        }
-        const payload = await response.json() as { ok?: boolean; error?: string; data?: unknown };
-        if (payload.ok !== true) {
-          throw new Error(payload.error ?? 'Resposta inválida da Mutual Tech.');
-        }
-        return payload.data;
-      };
-
-      const scan = await fetchActiveObjectProductCatalog(atlasGet, setAtlasProgress);
-      setProductScan(scan);
-      setAtlasContracts([]);
-      setSoftruckDiagnostic(null);
-      setAtlasLastRefresh(scan.complete ? new Date().toISOString() : null);
-    } catch (error) {
-      setAtlasContracts([]);
-      setProductScan(null);
-      setSoftruckDiagnostic(null);
-      setAtlasLastRefresh(null);
-      const msg = error instanceof Error ? error.message : 'Falha ao consultar os rastreadores ativos da Mutual Tech.';
-      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
-        setAtlasError('Não foi possível conectar à Mutual Tech. Verifique sua internet e tente novamente.');
-      } else {
-        setAtlasError(msg);
-      }
-    } finally {
-      setAtlasLoading(false);
-      setAtlasProgress(null);
-    }
-  }, [role]);
-
   useEffect(() => { void loadData(); }, [loadData]);
-  useEffect(() => { if (role === 'administrador' || role === 'diretoria') loadAtlasContracts(); }, [role, loadAtlasContracts]);
 
   const toggleRow = (id: string) => {
     setExpandedRows((prev) => {
@@ -177,8 +112,7 @@ export function Associados() {
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
-    });
-  };
+    });  };
 
   const openCreate = () => {
     setForm({
@@ -311,88 +245,6 @@ export function Associados() {
         action={canCreate ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Novo Associado</Button> : undefined}
       />
 
-      {(role === 'administrador' || role === 'diretoria') && (
-        <section className="mb-6 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Integração Atlas/Mutual</h2>
-                <Badge color="slate">origem dos dados</Badge>
-                <Badge color="blue">somente leitura</Badge>
-              </div>
-              <p className="mt-1 text-sm text-slate-500">Varredura somente leitura de todos os objetos e contratos ativos da Mutual Tech. Primeiro identifica e contabiliza os produtos vinculados; a confirmação de rastreador depende da validação posterior dos vínculos de veículo e titular.</p>
-            </div>
-            <Button variant="secondary" onClick={loadAtlasContracts} disabled={atlasLoading}>{atlasLoading ? 'Consultando…' : 'Atualizar consulta completa'}</Button>
-          </div>
-          {atlasLoading && <div className="mb-3 text-sm text-slate-600">
-            <p>Varredura em lotes de 50 objetos. {atlasProgress?.page ? `Página ${atlasProgress.page}${atlasProgress.pagesTotal ? ` de ${atlasProgress.pagesTotal}` : ''} · ${atlasProgress.objectsScanned.toLocaleString('pt-BR')} objetos processados` : 'Preparando primeira página…'}</p>
-            {atlasProgress?.totalActiveObjects && <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"><div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.min(100, atlasProgress.objectsScanned / atlasProgress.totalActiveObjects * 100)}%` }} /></div>}
-          </div>}
-          {atlasError && <p className="mb-3 text-sm text-red-600">{atlasError}</p>}
-          {atlasLastRefresh && !atlasError && <p className="mb-3 text-xs text-slate-500">Última consulta completa: {new Date(atlasLastRefresh).toLocaleString('pt-BR')}</p>}
-          {productScan && <div className="mb-4 rounded-lg border border-slate-200 p-4 text-sm dark:border-slate-700">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-semibold">Varredura de produtos dos objetos ativos</p>
-              <Badge color={productScan.complete ? 'green' : 'yellow'}>{productScan.complete ? 'Varredura completa' : 'Incompleta'}</Badge>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <div><p className="text-xs text-slate-500">Objetos ativos na base</p><p className="text-lg font-semibold">{productScan.totalActiveObjects?.toLocaleString('pt-BR') ?? '—'}</p></div>
-              <div><p className="text-xs text-slate-500">Objetos consultados</p><p className="text-lg font-semibold">{productScan.objectsScanned.toLocaleString('pt-BR')}</p></div>
-              <div><p className="text-xs text-slate-500">Vínculos de produto</p><p className="text-lg font-semibold">{productScan.productRowsScanned.toLocaleString('pt-BR')}</p></div>
-              <div><p className="text-xs text-slate-500">Páginas percorridas</p><p className="text-lg font-semibold">{productScan.pagesScanned.toLocaleString('pt-BR')}</p></div>
-            </div>
-            {productScan.failedObjects > 0 && <p className="mt-2 text-sm text-red-600">{productScan.failedObjects} objetos tiveram falha na consulta. O resultado não pode ser considerado conclusivo.</p>}
-            {productScan.countChangedDuringScan && <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">A Mutual alterou a contagem durante a consulta (inicial: {productScan.totalActiveObjects?.toLocaleString('pt-BR') ?? '—'}; última leitura: {productScan.latestReportedTotal?.toLocaleString('pt-BR') ?? '—'}). Os dados foram preservados, mas esta execução não será marcada como conclusiva.</p>}
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead><tr className="border-b border-slate-200 text-xs uppercase text-slate-500 dark:border-slate-700"><th className="py-2 pr-3">ID produto</th><th className="py-2 pr-3">Produto / descrição</th><th className="py-2 pr-3">Código fornecedor</th><th className="py-2 pr-3">Vínculos</th><th className="py-2 pr-3">Ativados</th><th className="py-2">Excluídos</th></tr></thead>
-                <tbody>{productScan.products.map((product) => <tr key={[product.productId, product.name, product.description, product.supplierCode].join('|')} className="border-b border-slate-100 dark:border-slate-800">
-                  <td className="py-2 pr-3 font-mono">{product.productId}</td>
-                  <td className="py-2 pr-3"><span className="font-medium">{product.name}</span>{product.description && <span className="block text-xs text-slate-500">{product.description}</span>}</td>
-                  <td className="py-2 pr-3">{product.supplierCode || '—'}</td>
-                  <td className="py-2 pr-3 tabular-nums">{product.occurrences.toLocaleString('pt-BR')}</td>
-                  <td className="py-2 pr-3 tabular-nums">{product.activated.toLocaleString('pt-BR')}</td>
-                  <td className="py-2 tabular-nums">{product.deleted.toLocaleString('pt-BR')}</td>
-                </tr>)}
-                {productScan.products.length === 0 && <tr><td colSpan={6} className="py-5 text-center text-slate-500">Nenhum vínculo de produto retornado nas páginas consultadas.</td></tr>}</tbody>
-              </table>
-            </div>
-            <p className="mt-3 text-xs text-slate-500">Esta etapa identifica o catálogo associado aos objetos ativos. Ela não declara quantidade de rastreadores: a confirmação exige cruzar os produtos identificados com ativação, veículo, contrato e titular.</p>
-          </div>}{softruckDiagnostic && <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700"><p className="font-medium">Rastreadores ativos confirmados na Mutual: {softruckDiagnostic.count}.</p><p className="mt-1 text-xs text-slate-500">Campos conciliados: {softruckDiagnostic.fields.join(', ') || 'nenhum campo encontrado'}.</p><p className="mt-1 text-xs text-slate-500">A classificação considera vínculo de produto ativado, contrato e objeto ativos, com IDs consistentes entre as consultas.</p>{softruckDiagnostic.routes && <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"><p className="font-medium">Diagnóstico das rotas (somente contagens e nomes de campos)</p>{softruckDiagnostic.routes.map((route) => <div key={route.resource} className="text-xs text-slate-500"><span className="font-medium text-slate-700 dark:text-slate-300">{route.resource}</span>: HTTP {route.httpStatus} · total {route.count ?? 'não informado'} · página {route.pageRows ?? '—'} registros{route.sampleFields.length ? ` · campos: ${route.sampleFields.join(', ')}` : ''}</div>)}</div>}</div>}
-          {atlasContracts.length > 0 && <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                <th className="px-3 py-3">Associado Mutual</th><th className="px-3 py-3">CPF/CNPJ</th><th className="px-3 py-3">Placa</th><th className="px-3 py-3">Veículo</th><th className="px-3 py-3">Contrato / objeto</th><th className="px-3 py-3">Produto ativo</th><th className="px-3 py-3">Comparação local</th>
-              </tr></thead>
-              <tbody>
-                {atlasContracts.map((row) => {
-                  const localMatch = compareWithLocal(row, data, unassignedVehicles);
-                  const localStatus = localMatch.status === 'matched'
-                    ? `Já cadastrado: ${localMatch.associateName}${localMatch.trackerStatus ? ` · rastreador local ${localMatch.trackerStatus}` : ' · sem rastreador local'}${localMatch.personMatches === false ? ' · titular divergente' : ''}`
-                    : localMatch.status === 'unassigned'
-                      ? `Veículo cadastrado sem associado${localMatch.trackerStatus ? ` · rastreador local ${localMatch.trackerStatus}` : ''}`
-                      : localMatch.status === 'ambiguous'
-                        ? 'ID externo duplicado nos dados locais'
-                        : localMatch.status === 'missing_external_id'
-                          ? 'Sem ID externo; não conciliável'
-                          : 'Veículo ainda não cadastrado';
-                  return <tr key={row.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="px-3 py-3 font-medium">{row.person.name ?? 'Nome não informado'}</td>
-                    <td className="px-3 py-3">{row.person.cpfCnpj ?? '—'}</td>
-                    <td className="px-3 py-3 font-mono">{row.vehicle.plate ?? '—'}</td>
-                    <td className="px-3 py-3">{[row.vehicle.assembler, row.vehicle.model].filter(Boolean).join(' ') || '—'}</td>
-                    <td className="px-3 py-3">{row.contract.id} / {row.id}</td>
-                    <td className="px-3 py-3">{row.product.name} · ativo</td>
-                    <td className="px-3 py-3">{localStatus}</td>
-                  </tr>;
-                })}
-                {!atlasLoading && atlasContracts.length === 0 && !atlasError && <tr><td className="px-3 py-8 text-center text-slate-500" colSpan={7}>A identificação de rastreadores ativos depende da confirmação do vínculo de produto pela Mutual Tech. Esta tela está em modo diagnóstico.</td></tr>}
-              </tbody>
-            </table>
-          </div>}
-          <p className="mt-3 text-xs text-slate-500">A consulta Softruck é somente leitura. Nenhum cadastro local é criado ou alterado.</p>
-        </section>
-      )}
 
       {loadError && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
@@ -597,8 +449,7 @@ export function Associados() {
           <div>
             <label className="label">E-mail</label>
             <input className="input" type="email" disabled={!canChangeForm} value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@exemplo.com" />
-          </div>
-          <div>
+          </div>          <div>
             <label className="label">Endereço</label>
             <input className="input" disabled={!canChangeForm} value={form.endereco ?? ''} onChange={(e) => setForm({ ...form, endereco: e.target.value })} placeholder="Rua, número, bairro" />
           </div>
