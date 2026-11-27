@@ -25,7 +25,11 @@ function corsHeaders(req: Request): Headers {
     "Content-Type": "application/json; charset=utf-8",
   });
   const origin = req.headers.get("Origin");
-  if (origin && ALLOWED_ORIGINS.has(origin)) headers.set("Access-Control-Allow-Origin", origin);
+  const isMovSatPreviewOrigin = origin !== null &&
+    /^https:\/\/movsat-saas-[a-z0-9-]+-mov4\.vercel\.app$/i.test(origin);
+  if (origin && (ALLOWED_ORIGINS.has(origin) || isMovSatPreviewOrigin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+  }
   return headers;
 }
 
